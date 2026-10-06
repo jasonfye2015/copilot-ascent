@@ -91,13 +91,6 @@
       color: var(--text);
     }
 
-    .small {
-      font-size: 11px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      opacity: 0.8;
-    }
-
     .crosshair {
       position: absolute;
       left: 50%;
@@ -109,25 +102,18 @@
       opacity: 0.5;
     }
 
-    .crosshair::before,
-    .crosshair::after {
+    .crosshair::before, .crosshair::after {
       content: "";
       position: absolute;
       background: rgba(125,211,252,0.7);
     }
 
     .crosshair::before {
-      left: 7px;
-      top: 0;
-      width: 2px;
-      height: 16px;
+      left: 7px; top: 0; width: 2px; height: 16px;
     }
 
     .crosshair::after {
-      left: 0;
-      top: 7px;
-      width: 16px;
-      height: 2px;
+      left: 0; top: 7px; width: 16px; height: 2px;
     }
 
     .toast {
@@ -149,9 +135,7 @@
       box-shadow: 0 0 18px rgba(125,211,252,0.14);
     }
 
-    .toast.show {
-      opacity: 1;
-    }
+    .toast.show { opacity: 1; }
   </style>
 </head>
 <body>
@@ -215,12 +199,18 @@
       loot: [],
       town: { gold: 0, relics: 0, upgrades: { vitality: 0, strength: 0, resolve: 0 } },
       familyLegacy: { vitality: 0, strength: 0, resolve: 0, bossKills: 0 },
-      selectedWeapon: 'Abyss Knife',
+      equipment: {
+        weapon: { name: 'Abyss Knife', damage: 18, rarity: 'common' },
+        armor: { name: 'Worn Leather', hp: 20, rarity: 'common' },
+        trinket: { name: 'Lumen Charm', power: 0, rarity: 'common' }
+      },
       inventory: [
-        { name: 'Abyss Knife', slot: 'weapon', rarity: 'common' },
-        { name: 'Lumen Charm', slot: 'trinket', rarity: 'common' }
+        { name: 'Abyss Knife', slot: 'weapon', rarity: 'common', equipped: true },
+        { name: 'Worn Leather', slot: 'armor', rarity: 'common', equipped: true },
+        { name: 'Lumen Charm', slot: 'trinket', rarity: 'common', equipped: true }
       ],
-      keys: { w:false, a:false, s:false, d:false, space:false, e:false, q:false, enter:false, '1':false, '2':false, '3':false, '4':false },
+      selectedWeapon: 'Abyss Knife',
+      keys: { w:false, a:false, s:false, d:false, space:false, e:false, q:false, enter:false, '1':false, '2':false, '3':false, '4':false, '5':false },
       minimap: []
     };
 
@@ -262,14 +252,47 @@
       return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
     }
 
-    function distance(a, b) {
-      return Math.hypot(a.x - b.x, a.y - b.y);
+    function addInventoryItem(name, slot = 'misc', rarity = 'common', bonus = 0) {
+      const item = { name, slot, rarity, equipped: false, bonus };
+      state.inventory.push(item);
+      if (state.inventory.length > 12) state.inventory.shift();
+      if (slot === 'weapon') {
+        state.selectedWeapon = name;
+      }
     }
 
-    function addInventoryItem(name, slot = 'misc', rarity = 'common') {
-      state.inventory.push({ name, slot, rarity });
-      if (state.inventory.length > 9) state.inventory.shift();
-      if (slot === 'weapon') state.selectedWeapon = name;
+    function equipItem(itemName) {
+      const item = state.inventory.find(i => i.name === itemName);
+      if (!item) return;
+
+      const slot = item.slot;
+      const old = state.inventory.find(i => i.slot === slot && i.equipped && i.name !== item.name);
+      if (old) old.equipped = false;
+
+      item.equipped = true;
+      state.equipment[slot] = {
+        name: item.name,
+        damage: slot === 'weapon' ? 16 + Math.floor(Math.random() * 12) + state.familyLegacy.strength : 0,
+        hp: slot === 'armor' ? 18 + Math.floor(Math.random() * 12) : 0,
+        power: slot === 'trinket' ? (item.bonus || 5) : 0,
+        rarity: item.rarity,
+      };
+
+      if (slot === 'weapon') state.selectedWeapon = item.name;
+      refreshPlayerStats();
+    }
+
+    function refreshPlayerStats() {
+      if (!state.player) return;
+      const baseDamage = 18 + state.familyLegacy.strength * 2;
+      const baseHp = 100 + state.familyLegacy.vitality * 10;
+      const weaponBoost = state.equipment.weapon.damage || 0;
+      const armorBoost = state.equipment.armor.hp || 0;
+      const trinketBoost = state.equipment.trinket.power || 0;
+
+      state.player.damage = baseDamage + weaponBoost + trinketBoost;
+      state.player.maxHp = baseHp + armorBoost + trinketBoost * 2;
+      state.player.hp = clamp(state.player.hp, 0, state.player.maxHp);
     }
 
     function createPlayer() {
@@ -303,8 +326,7 @@
       };
 
       if (type === 'brute') {
-        enemy.w = 26;
-        enemy.h = 26;
+        enemy.w = 26; enemy.h = 26;
         enemy.hp = 70 + state.floor * 12;
         enemy.maxHp = enemy.hp;
         enemy.speed = 30 + state.floor * 3;
@@ -332,13 +354,7 @@
 
     function roomTypeLabel(type) {
       const labels = {
-        start: 'Entry',
-        combat: 'Combat',
-        treasure: 'Treasure',
-        shrine: 'Shrine',
-        rest: 'Sanctum',
-        boss: 'Boss',
-        empty: 'Hall'
+        start: 'Entry', combat: 'Combat', treasure: 'Treasure', shrine: 'Shrine', rest: 'Sanctum', boss: 'Boss', empty: 'Hall'
       };
       return labels[type] || 'Hall';
     }
@@ -360,20 +376,12 @@
       for (let y = 0; y < size; y++) {
         const row = [];
         for (let x = 0; x < size; x++) {
-          row.push({
-            x, y,
-            type: 'empty',
-            doors: { n:false, e:false, s:false, w:false },
-            enemies: [],
-            loot: [],
-            visited: false,
-            boss: false,
-          });
+          row.push({ x, y, type: 'empty', doors: { n:false, e:false, s:false, w:false }, enemies: [], loot: [], visited: false, boss: false });
         }
         grid.push(row);
       }
 
-      const mid = Math.floor(size / 2);
+      const mid = Math.floor(size/2);
       const start = grid[mid][mid];
       start.type = 'start';
       start.visited = true;
@@ -420,25 +428,19 @@
           if (room.type === 'start') continue;
           if (room.type === 'combat') {
             const enemyCount = 2 + Math.floor(Math.random() * 3) + Math.min(3, floorNumber);
-            for (let i = 0; i < enemyCount; i++) {
-              room.enemies.push(createEnemy(Math.random() < 0.25 ? 'brute' : 'crawler'));
-            }
+            for (let i = 0; i < enemyCount; i++) room.enemies.push(createEnemy(Math.random() < 0.25 ? 'brute' : 'crawler'));
           }
           if (room.type === 'treasure') {
             room.enemies.push(createEnemy(Math.random() < 0.4 ? 'brute' : 'crawler'));
             room.loot.push({ kind: 'gold', x: GAME_WIDTH * 0.7, y: GAME_HEIGHT * 0.5, w: 12, h: 12 });
             room.loot.push({ kind: 'relic', x: GAME_WIDTH * 0.3, y: GAME_HEIGHT * 0.5, w: 12, h: 12 });
           }
-          if (room.type === 'rest') {
-            room.loot.push({ kind: 'heal', x: GAME_WIDTH * 0.5, y: GAME_HEIGHT * 0.5, w: 12, h: 12 });
-          }
+          if (room.type === 'rest') room.loot.push({ kind: 'heal', x: GAME_WIDTH * 0.5, y: GAME_HEIGHT * 0.5, w: 12, h: 12 });
           if (room.type === 'shrine') {
             room.enemies.push(createEnemy('crawler'));
             room.loot.push({ kind: 'blessing', x: GAME_WIDTH * 0.5, y: GAME_HEIGHT * 0.5, w: 12, h: 12 });
           }
-          if (room.type === 'boss') {
-            room.enemies.push(createBoss());
-          }
+          if (room.type === 'boss') room.enemies.push(createBoss());
         }
       }
 
@@ -453,6 +455,7 @@
       state.projectiles = [];
       state.loot = [...state.currentRoom.loot];
       state.enemies = [...state.currentRoom.enemies];
+      refreshPlayerStats();
       ui.floorValue.textContent = state.floor;
       ui.familyValue.textContent = 'Gen ' + state.familyGeneration;
       ui.healthValue.textContent = `${Math.ceil(state.player.hp)} / ${state.player.maxHp}`;
@@ -466,6 +469,7 @@
       if (!next) return false;
 
       state.currentRoom = next;
+      state.currentRoom.visited = true;
       state.loot = [...next.loot];
       state.enemies = [...next.enemies];
 
@@ -476,21 +480,20 @@
         w: { x: GAME_WIDTH - 90, y: GAME_HEIGHT * 0.5 }
       };
       const pos = spawn[direction];
-      state.player.x = pos.x;
-      state.player.y = pos.y;
+      state.player.x = pos.x; state.player.y = pos.y;
       showToast(roomTypeLabel(next.type));
       return true;
     }
 
     function handleRoomTransitionInput() {
-      const doorChecks = [
+      const checks = [
         ['n', state.keys.w],
         ['s', state.keys.s],
         ['e', state.keys.d],
         ['w', state.keys.a]
       ];
 
-      for (const [dir, pressed] of doorChecks) {
+      for (const [dir, pressed] of checks) {
         if (!pressed || !state.currentRoom.doors[dir]) continue;
         const px = state.player.x;
         const py = state.player.y;
@@ -500,11 +503,23 @@
           (dir === 'e' && px > GAME_WIDTH - 78 && py > GAME_HEIGHT * 0.42 && py < GAME_HEIGHT * 0.58) ||
           (dir === 'w' && px < 78 && py > GAME_HEIGHT * 0.42 && py < GAME_HEIGHT * 0.58)
         );
-        if (nearDoor) {
-          tryTransition(dir);
-          return;
-        }
+        if (nearDoor) { tryTransition(dir); return; }
       }
+    }
+
+    function playerAttack() {
+      state.player.attackCooldown = 0.3;
+      state.projectiles.push({
+        x: state.player.x,
+        y: state.player.y,
+        w: 10,
+        h: 10,
+        dx: (state.player.facingX || 1) * 520,
+        dy: (state.player.facingY || 0) * 520,
+        life: 0.45,
+        owner: 'player',
+        damage: state.player.damage,
+      });
     }
 
     function updatePlayer(dt) {
@@ -526,18 +541,7 @@
       }
 
       if (state.keys.space && player.attackCooldown <= 0) {
-        player.attackCooldown = 0.3;
-        state.projectiles.push({
-          x: player.x,
-          y: player.y,
-          w: 10,
-          h: 10,
-          dx: (player.facingX || 1) * 520,
-          dy: (player.facingY || 0) * 520,
-          life: 0.45,
-          owner: 'player',
-          damage: player.damage,
-        });
+        playerAttack();
       }
 
       handleRoomTransitionInput();
@@ -605,7 +609,7 @@
           }
           if (item.kind === 'relic') {
             state.familyLegacy.resolve += 1;
-            addInventoryItem('Relic Shard', 'trinket');
+            addInventoryItem('Relic Shard', 'trinket', 'rare', 6);
           }
           if (item.kind === 'heal') {
             player.hp = player.maxHp;
@@ -614,7 +618,7 @@
           if (item.kind === 'blessing') {
             player.maxHp += 10;
             player.hp = player.maxHp;
-            addInventoryItem('Blessed Sigil', 'trinket', 'rare');
+            addInventoryItem('Blessed Sigil', 'trinket', 'rare', 8);
             showToast('Blessing gained');
           }
           item.collected = true;
@@ -647,7 +651,6 @@
     function drawMinimap() {
       const size = state.mapSize;
       const cell = 12;
-      const margin = 20;
       const startX = GAME_WIDTH - 170;
       const startY = 150;
 
@@ -657,25 +660,25 @@
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
           const room = getRoomAt(x, y);
-          const fill = room && room.visited ? '#1d4e67' : '#0f172a';
-          if (room && room.type === 'boss') ctx.fillStyle = '#f59e0b';
-          else if (room && room.type === 'start') ctx.fillStyle = '#22c55e';
-          else ctx.fillStyle = fill;
+          let color = '#0f172a';
+          if (room && room.visited) color = '#1d4e67';
+          if (room && room.type === 'boss') color = '#f59e0b';
+          if (room && room.type === 'start') color = '#22c55e';
+          ctx.fillStyle = color;
           ctx.fillRect(startX + x * cell, startY + y * cell, cell - 2, cell - 2);
         }
       }
 
-      const current = state.currentRoom;
-      if (current) {
+      if (state.currentRoom) {
         ctx.strokeStyle = '#7dd3fc';
         ctx.lineWidth = 2;
-        ctx.strokeRect(startX + current.x * cell - 1, startY + current.y * cell - 1, cell, cell);
+        ctx.strokeRect(startX + state.currentRoom.x * cell - 1, startY + state.currentRoom.y * cell - 1, cell, cell);
       }
     }
 
     function drawInventoryPanel() {
       ctx.fillStyle = 'rgba(10,16,24,0.8)';
-      ctx.fillRect(GAME_WIDTH - 220, 335, 190, 200);
+      ctx.fillRect(GAME_WIDTH - 220, 335, 190, 220);
 
       ctx.fillStyle = '#dfefff';
       ctx.font = '14px Segoe UI';
@@ -683,20 +686,18 @@
 
       state.inventory.forEach((item, index) => {
         const y = 382 + index * 18;
-        ctx.fillStyle = item.slot === 'weapon' ? '#fbbf24' : '#7dd3fc';
-        ctx.fillText(item.name, GAME_WIDTH - 190, y);
+        ctx.fillStyle = item.equipped ? '#fbbf24' : '#7dd3fc';
+        ctx.fillText((item.equipped ? '*' : ' ') + item.name, GAME_WIDTH - 190, y);
       });
     }
 
     function renderTitle() {
       ctx.fillStyle = '#08121d';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
       ctx.fillStyle = '#7dd3fc';
       ctx.font = 'bold 44px Segoe UI';
       ctx.textAlign = 'center';
       ctx.fillText('Copilot Ascent', GAME_WIDTH / 2, 200);
-
       ctx.font = '20px Segoe UI';
       ctx.fillStyle = '#dfefff';
       ctx.fillText('A rogue-like ascent through a cursed tower', GAME_WIDTH / 2, 250);
@@ -710,7 +711,6 @@
     function renderTown() {
       ctx.fillStyle = '#0d1826';
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
       ctx.fillStyle = '#7dd3fc';
       ctx.font = 'bold 32px Segoe UI';
       ctx.textAlign = 'center';
@@ -721,32 +721,25 @@
       ctx.fillText('E - Return to the Tower', GAME_WIDTH / 2, 150);
       ctx.fillText('Gold: ' + state.town.gold + '   Relics: ' + state.familyLegacy.resolve, GAME_WIDTH / 2, 190);
 
-      ctx.fillStyle = '#67e8f9';
-      ctx.fillRect(180, 230, 240, 150);
-      ctx.fillStyle = '#dfefff';
-      ctx.fillText('Vitality', 300, 270);
-      ctx.fillText('Level ' + state.town.upgrades.vitality, 300, 305);
-      ctx.fillText('Cost: 15 gold', 300, 340);
-      ctx.fillText('Press 1', 300, 365);
+      const cards = [
+        { x: 180, y: 230, name: 'Vitality', level: state.town.upgrades.vitality, key: '1' },
+        { x: 500, y: 230, name: 'Strength', level: state.town.upgrades.strength, key: '2' },
+        { x: 820, y: 230, name: 'Resolve', level: state.town.upgrades.resolve, key: '3' },
+        { x: 500, y: 420, name: 'Forge', level: 'Rift Edge', key: '4' },
+      ];
 
-      ctx.fillStyle = '#67e8f9';
-      ctx.fillRect(500, 230, 240, 150);
-      ctx.fillStyle = '#dfefff';
-      ctx.fillText('Strength', 620, 270);
-      ctx.fillText('Level ' + state.town.upgrades.strength, 620, 305);
-      ctx.fillText('Cost: 15 gold', 620, 340);
-      ctx.fillText('Press 2', 620, 365);
-
-      ctx.fillStyle = '#67e8f9';
-      ctx.fillRect(820, 230, 240, 150);
-      ctx.fillStyle = '#dfefff';
-      ctx.fillText('Resolve', 940, 270);
-      ctx.fillText('Level ' + state.town.upgrades.resolve, 940, 305);
-      ctx.fillText('Cost: 15 gold', 940, 340);
-      ctx.fillText('Press 3', 940, 365);
+      for (const card of cards) {
+        ctx.fillStyle = '#67e8f9';
+        ctx.fillRect(card.x, card.y, 240, 150);
+        ctx.fillStyle = '#dfefff';
+        ctx.fillText(card.name, card.x + 120, card.y + 40);
+        ctx.fillText('Level ' + card.level, card.x + 120, card.y + 75);
+        ctx.fillText('Cost: ' + (card.name === 'Forge' ? '20 gold' : '15 gold'), card.x + 120, card.y + 105);
+        ctx.fillText('Press ' + card.key, card.x + 120, card.y + 135);
+      }
 
       ctx.fillStyle = '#fbbf24';
-      ctx.fillText('Family Blessing: ' + state.familyLegacy.bossKills + ' bosses defeated', GAME_WIDTH / 2, 610);
+      ctx.fillText('Family Blessing: ' + state.familyLegacy.bossKills + ' bosses defeated', GAME_WIDTH / 2, 650);
     }
 
     function drawRoom() {
@@ -842,8 +835,8 @@
       if (state.keys['4']) {
         if (state.town.gold >= 20) {
           state.town.gold -= 20;
-          addInventoryItem('Rift Edge', 'weapon', 'rare');
-          state.selectedWeapon = 'Rift Edge';
+          addInventoryItem('Rift Edge', 'weapon', 'rare', 15);
+          equipItem('Rift Edge');
           showToast('Weapon forged');
         }
       }
@@ -883,7 +876,7 @@
         w: 'w', a: 'a', s: 's', d: 'd',
         ArrowUp: 'w', ArrowLeft: 'a', ArrowDown: 's', ArrowRight: 'd',
         ' ': 'space', e: 'e', q: 'q', Enter: 'enter',
-        '1': '1', '2': '2', '3': '3', '4': '4'
+        '1': '1', '2': '2', '3': '3', '4': '4', '5': '5'
       };
 
       window.addEventListener('keydown', (event) => {
