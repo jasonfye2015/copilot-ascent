@@ -198,7 +198,6 @@
 
     const GAME_WIDTH = canvas.width;
     const GAME_HEIGHT = canvas.height;
-    const TILE = 64;
 
     const state = {
       mode: 'title',
@@ -206,7 +205,6 @@
       maxFloor: 50,
       familyGeneration: 1,
       time: 0,
-      keys: { w:false, a:false, s:false, d:false, space:false, e:false, q:false, enter:false, '1':false, '2':false, '3':false },
       lastTime: 0,
       mapSize: 5,
       rooms: [],
@@ -215,10 +213,14 @@
       enemies: [],
       projectiles: [],
       loot: [],
-      floorCleared: false,
-      town: { gold: 0, relics: 0, upgrades: { vitality:0, strength:0, resolve:0 } },
-      familyLegacy: { vitality:0, strength:0, resolve:0, bossKills:0 },
+      town: { gold: 0, relics: 0, upgrades: { vitality: 0, strength: 0, resolve: 0 } },
+      familyLegacy: { vitality: 0, strength: 0, resolve: 0, bossKills: 0 },
       selectedWeapon: 'Abyss Knife',
+      inventory: [
+        { name: 'Abyss Knife', slot: 'weapon', rarity: 'common' },
+        { name: 'Lumen Charm', slot: 'trinket', rarity: 'common' }
+      ],
+      keys: { w:false, a:false, s:false, d:false, space:false, e:false, q:false, enter:false, '1':false, '2':false, '3':false, '4':false },
       minimap: []
     };
 
@@ -237,7 +239,7 @@
       localStorage.setItem('copilot-ascent-legacy', JSON.stringify(state.familyLegacy));
     }
 
-    function showToast(text, duration = 1500) {
+    function showToast(text, duration = 1400) {
       toastEl.textContent = text;
       toastEl.classList.add('show');
       clearTimeout(showToast.timeoutId);
@@ -264,10 +266,16 @@
       return Math.hypot(a.x - b.x, a.y - b.y);
     }
 
+    function addInventoryItem(name, slot = 'misc', rarity = 'common') {
+      state.inventory.push({ name, slot, rarity });
+      if (state.inventory.length > 9) state.inventory.shift();
+      if (slot === 'weapon') state.selectedWeapon = name;
+    }
+
     function createPlayer() {
       return {
-        x: GAME_WIDTH * 0.5,
-        y: GAME_HEIGHT * 0.6,
+        x: GAME_WIDTH * 0.52,
+        y: GAME_HEIGHT * 0.62,
         w: 22,
         h: 22,
         speed: 220,
@@ -276,7 +284,7 @@
         damage: 18 + state.familyLegacy.strength * 2,
         attackCooldown: 0,
         facingX: 1,
-        facingY: 0
+        facingY: 0,
       };
     }
 
@@ -291,7 +299,7 @@
         maxHp: 26 + state.floor * 6,
         speed: 45 + state.floor * 3,
         damage: 8 + state.floor,
-        attackCooldown: 0
+        attackCooldown: 0,
       };
 
       if (type === 'brute') {
@@ -318,7 +326,7 @@
         speed: 70 + state.floor * 2,
         damage: 16 + state.floor * 2,
         attackCooldown: 0,
-        phase: 0
+        phase: 0,
       };
     }
 
@@ -335,67 +343,67 @@
       return labels[type] || 'Hall';
     }
 
+    function getRoomAt(x, y) {
+      if (!state.rooms.length || y < 0 || x < 0 || y >= state.rooms.length || x >= state.rooms[0].length) return null;
+      return state.rooms[y][x];
+    }
+
+    function getNeighborRoom(room, dir) {
+      const offsets = { n:[0,-1], e:[1,0], s:[0,1], w:[-1,0] };
+      const [dx, dy] = offsets[dir];
+      return getRoomAt(room.x + dx, room.y + dy);
+    }
+
     function buildFloor(floorNumber) {
       const size = state.mapSize;
-      const roomGrid = [];
-
+      const grid = [];
       for (let y = 0; y < size; y++) {
         const row = [];
         for (let x = 0; x < size; x++) {
           row.push({
             x, y,
             type: 'empty',
-            doors: { n: false, e: false, s: false, w: false },
+            doors: { n:false, e:false, s:false, w:false },
             enemies: [],
             loot: [],
             visited: false,
-            boss: false
+            boss: false,
           });
         }
-        roomGrid.push(row);
+        grid.push(row);
       }
 
-      const startRoom = roomGrid[Math.floor(size / 2)][Math.floor(size / 2)];
-      startRoom.type = 'start';
-      startRoom.visited = true;
+      const mid = Math.floor(size / 2);
+      const start = grid[mid][mid];
+      start.type = 'start';
+      start.visited = true;
 
-      const available = [];
+      const bossCandidates = [];
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
-          if (x !== Math.floor(size / 2) || y !== Math.floor(size / 2)) {
-            available.push({ x, y });
-          }
+          if (x === mid && y === mid) continue;
+          bossCandidates.push({ x, y, dist: Math.abs(x - mid) + Math.abs(y - mid) });
         }
       }
-
-      let bossRoom = { x: 0, y: 0 };
-      let farthest = -1;
-      for (const pos of available) {
-        const dx = pos.x - Math.floor(size / 2);
-        const dy = pos.y - Math.floor(size / 2);
-        const dist = Math.abs(dx) + Math.abs(dy);
-        if (dist > farthest) {
-          farthest = dist;
-          bossRoom = pos;
-        }
-      }
-      const bossTarget = roomGrid[bossRoom.y][bossRoom.x];
-      bossTarget.type = 'boss';
-      bossTarget.boss = true;
+      bossCandidates.sort((a, b) => b.dist - a.dist);
+      const bossPos = bossCandidates[0];
+      const bossRoom = grid[bossPos.y][bossPos.x];
+      bossRoom.type = 'boss';
+      bossRoom.boss = true;
 
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
-          const room = roomGrid[y][x];
-          if (x > 0) room.doors.w = true; roomGrid[y][x - 1].doors.e = true;
+          const room = grid[y][x];
+          if (x > 0) room.doors.w = true;
           if (x < size - 1) room.doors.e = true;
-          if (y > 0) room.doors.n = true; roomGrid[y - 1][x].doors.s = true;
+          if (y > 0) room.doors.n = true;
           if (y < size - 1) room.doors.s = true;
         }
       }
 
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
-          const room = roomGrid[y][x];
+          const room = grid[y][x];
           if (room.type === 'start' || room.type === 'boss') continue;
           const roll = Math.random();
           if (roll < 0.42) room.type = 'combat';
@@ -408,12 +416,8 @@
 
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
-          const room = roomGrid[y][x];
-          if (room.type === 'start') {
-            room.enemies = [];
-            room.loot = [];
-            continue;
-          }
+          const room = grid[y][x];
+          if (room.type === 'start') continue;
           if (room.type === 'combat') {
             const enemyCount = 2 + Math.floor(Math.random() * 3) + Math.min(3, floorNumber);
             for (let i = 0; i < enemyCount; i++) {
@@ -422,8 +426,8 @@
           }
           if (room.type === 'treasure') {
             room.enemies.push(createEnemy(Math.random() < 0.4 ? 'brute' : 'crawler'));
-            room.loot.push({ kind: 'gold', x: GAME_WIDTH * 0.7, y: GAME_HEIGHT * 0.5, w: 10, h: 10 });
-            room.loot.push({ kind: 'relic', x: GAME_WIDTH * 0.3, y: GAME_HEIGHT * 0.5, w: 10, h: 10 });
+            room.loot.push({ kind: 'gold', x: GAME_WIDTH * 0.7, y: GAME_HEIGHT * 0.5, w: 12, h: 12 });
+            room.loot.push({ kind: 'relic', x: GAME_WIDTH * 0.3, y: GAME_HEIGHT * 0.5, w: 12, h: 12 });
           }
           if (room.type === 'rest') {
             room.loot.push({ kind: 'heal', x: GAME_WIDTH * 0.5, y: GAME_HEIGHT * 0.5, w: 12, h: 12 });
@@ -438,30 +442,16 @@
         }
       }
 
-      return roomGrid;
-    }
-
-    function getRoomAt(x, y) {
-      if (!state.rooms.length) return null;
-      return state.rooms[y]?.[x] || null;
-    }
-
-    function getNeighborRoom(room, dir) {
-      const offsets = { n:[0,-1], e:[1,0], s:[0,1], w:[-1,0] };
-      const [dx, dy] = offsets[dir];
-      return getRoomAt(room.x + dx, room.y + dy);
+      return grid;
     }
 
     function initFloor() {
       state.rooms = buildFloor(state.floor);
-      const start = state.rooms[Math.floor(state.mapSize / 2)][Math.floor(state.mapSize / 2)];
-      state.currentRoom = start;
+      const mid = Math.floor(state.mapSize / 2);
+      state.currentRoom = state.rooms[mid][mid];
       state.player = createPlayer();
-      state.player.x = GAME_WIDTH * 0.52;
-      state.player.y = GAME_HEIGHT * 0.62;
       state.projectiles = [];
-      state.loot = [];
-      state.floorCleared = false;
+      state.loot = [...state.currentRoom.loot];
       state.enemies = [...state.currentRoom.enemies];
       ui.floorValue.textContent = state.floor;
       ui.familyValue.textContent = 'Gen ' + state.familyGeneration;
@@ -476,8 +466,8 @@
       if (!next) return false;
 
       state.currentRoom = next;
-      state.enemies = [...next.enemies];
       state.loot = [...next.loot];
+      state.enemies = [...next.enemies];
 
       const spawn = {
         n: { x: GAME_WIDTH * 0.5, y: GAME_HEIGHT - 70 },
@@ -485,7 +475,6 @@
         e: { x: 75, y: GAME_HEIGHT * 0.5 },
         w: { x: GAME_WIDTH - 90, y: GAME_HEIGHT * 0.5 }
       };
-
       const pos = spawn[direction];
       state.player.x = pos.x;
       state.player.y = pos.y;
@@ -502,19 +491,18 @@
       ];
 
       for (const [dir, pressed] of doorChecks) {
-        if (pressed && state.currentRoom.doors[dir]) {
-          const px = state.player.x;
-          const py = state.player.y;
-          const nearDoor = (
-            (dir === 'n' && py < 56 && px > GAME_WIDTH * 0.42 && px < GAME_WIDTH * 0.58) ||
-            (dir === 's' && py > GAME_HEIGHT - 68 && px > GAME_WIDTH * 0.42 && px < GAME_WIDTH * 0.58) ||
-            (dir === 'e' && px > GAME_WIDTH - 78 && py > GAME_HEIGHT * 0.42 && py < GAME_HEIGHT * 0.58) ||
-            (dir === 'w' && px < 78 && py > GAME_HEIGHT * 0.42 && py < GAME_HEIGHT * 0.58)
-          );
-          if (nearDoor) {
-            tryTransition(dir);
-            return;
-          }
+        if (!pressed || !state.currentRoom.doors[dir]) continue;
+        const px = state.player.x;
+        const py = state.player.y;
+        const nearDoor = (
+          (dir === 'n' && py < 56 && px > GAME_WIDTH * 0.42 && px < GAME_WIDTH * 0.58) ||
+          (dir === 's' && py > GAME_HEIGHT - 68 && px > GAME_WIDTH * 0.42 && px < GAME_WIDTH * 0.58) ||
+          (dir === 'e' && px > GAME_WIDTH - 78 && py > GAME_HEIGHT * 0.42 && py < GAME_HEIGHT * 0.58) ||
+          (dir === 'w' && px < 78 && py > GAME_HEIGHT * 0.42 && py < GAME_HEIGHT * 0.58)
+        );
+        if (nearDoor) {
+          tryTransition(dir);
+          return;
         }
       }
     }
@@ -529,31 +517,26 @@
         const len = Math.hypot(dx, dy) || 1;
         const moveX = (dx / len) * player.speed * dt;
         const moveY = (dy / len) * player.speed * dt;
-        player.x = clamp(player.x + moveX, 40, GAME_WIDTH - 45);
-        player.y = clamp(player.y + moveY, 40, GAME_HEIGHT - 45);
-
-        if (Math.abs(dx) > Math.abs(dy)) player.facingX = dx;
-        else player.facingY = dy;
+        player.x = clamp(player.x + moveX, 40, GAME_WIDTH - 50);
+        player.y = clamp(player.y + moveY, 40, GAME_HEIGHT - 50);
+        if (Math.abs(dx) >= Math.abs(dy)) player.facingX = dx;
+        if (Math.abs(dy) > Math.abs(dx)) player.facingY = dy;
         if (dx !== 0) player.facingX = dx;
         if (dy !== 0) player.facingY = dy;
       }
 
       if (state.keys.space && player.attackCooldown <= 0) {
         player.attackCooldown = 0.3;
-
-        const projSpeed = 520;
-        const dxDir = player.facingX || 1;
-        const dyDir = player.facingY || 0;
         state.projectiles.push({
           x: player.x,
           y: player.y,
           w: 10,
           h: 10,
-          dx: dxDir * projSpeed,
-          dy: dyDir * projSpeed,
+          dx: (player.facingX || 1) * 520,
+          dy: (player.facingY || 0) * 520,
           life: 0.45,
           owner: 'player',
-          damage: player.damage
+          damage: player.damage,
         });
       }
 
@@ -568,8 +551,8 @@
 
       for (const enemy of state.enemies) {
         enemy.attackCooldown = Math.max(0, enemy.attackCooldown - dt);
-        const ex = enemy.x - player.x;
-        const ey = enemy.y - player.y;
+        const ex = player.x - enemy.x;
+        const ey = player.y - enemy.y;
         const len = Math.hypot(ex, ey) || 1;
         if (len < 260) {
           enemy.x += (ex / len) * enemy.speed * dt;
@@ -582,11 +565,10 @@
         }
 
         for (const projectile of state.projectiles) {
-          if (projectile.owner === 'player') {
-            if (rectsIntersect({ x: projectile.x, y: projectile.y, w: projectile.w, h: projectile.h }, { x: enemy.x, y: enemy.y, w: enemy.w, h: enemy.h })) {
-              enemy.hp -= projectile.damage;
-              projectile.life = 0;
-            }
+          if (projectile.owner !== 'player') continue;
+          if (rectsIntersect({ x: projectile.x, y: projectile.y, w: projectile.w, h: projectile.h }, { x: enemy.x, y: enemy.y, w: enemy.w, h: enemy.h })) {
+            enemy.hp -= projectile.damage;
+            projectile.life = 0;
           }
         }
       }
@@ -594,7 +576,6 @@
       state.enemies = state.enemies.filter(enemy => {
         if (enemy.hp <= 0) {
           if (enemy.type === 'boss') {
-            state.floorCleared = true;
             state.familyLegacy.bossKills += 1;
             saveLegacy();
             if (state.floor >= state.maxFloor) {
@@ -608,6 +589,9 @@
             }
           } else {
             state.loot.push({ kind: 'gold', x: enemy.x, y: enemy.y, w: 12, h: 12 });
+            if (Math.random() < 0.18) {
+              state.loot.push({ kind: 'relic', x: enemy.x + 10, y: enemy.y + 10, w: 12, h: 12 });
+            }
           }
           return false;
         }
@@ -621,12 +605,17 @@
           }
           if (item.kind === 'relic') {
             state.familyLegacy.resolve += 1;
+            addInventoryItem('Relic Shard', 'trinket');
           }
           if (item.kind === 'heal') {
             player.hp = player.maxHp;
+            showToast('Recovered');
           }
           if (item.kind === 'blessing') {
-            state.familyLegacy.vitality += 1;
+            player.maxHp += 10;
+            player.hp = player.maxHp;
+            addInventoryItem('Blessed Sigil', 'trinket', 'rare');
+            showToast('Blessing gained');
           }
           item.collected = true;
         }
@@ -650,9 +639,53 @@
       ui.familyValue.textContent = 'Gen ' + state.familyGeneration;
     }
 
-    function drawDoor(x, y, w, h, active) {
-      ctx.fillStyle = active ? '#67e8f9' : '#1e293b';
+    function drawDoor(x, y, w, h) {
+      ctx.fillStyle = '#67e8f9';
       ctx.fillRect(x, y, w, h);
+    }
+
+    function drawMinimap() {
+      const size = state.mapSize;
+      const cell = 12;
+      const margin = 20;
+      const startX = GAME_WIDTH - 170;
+      const startY = 150;
+
+      ctx.fillStyle = 'rgba(10,16,24,0.85)';
+      ctx.fillRect(startX - 8, startY - 8, cell * size + 16, cell * size + 16);
+
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const room = getRoomAt(x, y);
+          const fill = room && room.visited ? '#1d4e67' : '#0f172a';
+          if (room && room.type === 'boss') ctx.fillStyle = '#f59e0b';
+          else if (room && room.type === 'start') ctx.fillStyle = '#22c55e';
+          else ctx.fillStyle = fill;
+          ctx.fillRect(startX + x * cell, startY + y * cell, cell - 2, cell - 2);
+        }
+      }
+
+      const current = state.currentRoom;
+      if (current) {
+        ctx.strokeStyle = '#7dd3fc';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(startX + current.x * cell - 1, startY + current.y * cell - 1, cell, cell);
+      }
+    }
+
+    function drawInventoryPanel() {
+      ctx.fillStyle = 'rgba(10,16,24,0.8)';
+      ctx.fillRect(GAME_WIDTH - 220, 335, 190, 200);
+
+      ctx.fillStyle = '#dfefff';
+      ctx.font = '14px Segoe UI';
+      ctx.fillText('Inventory', GAME_WIDTH - 180, 360);
+
+      state.inventory.forEach((item, index) => {
+        const y = 382 + index * 18;
+        ctx.fillStyle = item.slot === 'weapon' ? '#fbbf24' : '#7dd3fc';
+        ctx.fillText(item.name, GAME_WIDTH - 190, y);
+      });
     }
 
     function renderTitle() {
@@ -736,10 +769,10 @@
       ctx.strokeRect(24, 24, GAME_WIDTH - 48, GAME_HEIGHT - 48);
 
       const doorSize = 52;
-      if (room.doors.n) drawDoor((GAME_WIDTH - doorSize) * 0.5, 10, doorSize, 18, true);
-      if (room.doors.s) drawDoor((GAME_WIDTH - doorSize) * 0.5, GAME_HEIGHT - 28, doorSize, 18, true);
-      if (room.doors.e) drawDoor(GAME_WIDTH - 28, (GAME_HEIGHT - doorSize) * 0.5, 18, doorSize, true);
-      if (room.doors.w) drawDoor(10, (GAME_HEIGHT - doorSize) * 0.5, 18, doorSize, true);
+      if (room.doors.n) drawDoor((GAME_WIDTH - doorSize) * 0.5, 10, doorSize, 18);
+      if (room.doors.s) drawDoor((GAME_WIDTH - doorSize) * 0.5, GAME_HEIGHT - 28, doorSize, 18);
+      if (room.doors.e) drawDoor(GAME_WIDTH - 28, (GAME_HEIGHT - doorSize) * 0.5, 18, doorSize);
+      if (room.doors.w) drawDoor(10, (GAME_HEIGHT - doorSize) * 0.5, 18, doorSize);
 
       for (const item of state.loot) {
         const color = item.kind === 'gold' ? '#fbbf24' : item.kind === 'heal' ? '#22c55e' : '#a78bfa';
@@ -768,19 +801,8 @@
       ctx.fillText(roomTypeLabel(room.type), 30, 68);
       ctx.fillText('HP: ' + Math.ceil(state.player.hp), 30, 94);
 
-      ctx.fillStyle = 'rgba(10, 16, 24, 0.8)';
-      ctx.fillRect(GAME_WIDTH - 220, 20, 190, 120);
-      ctx.fillStyle = '#dfefff';
-      ctx.font = '14px Segoe UI';
-      ctx.fillText('Objective', GAME_WIDTH - 175, 42);
-      if (room.type === 'boss') {
-        ctx.fillText('Defeat the boss', GAME_WIDTH - 175, 62);
-      } else {
-        ctx.fillText('Clear the room', GAME_WIDTH - 175, 62);
-      }
-      ctx.fillText('Move: WASD', GAME_WIDTH - 175, 82);
-      ctx.fillText('Attack: SPACE', GAME_WIDTH - 175, 102);
-      ctx.fillText('Town: Q', GAME_WIDTH - 175, 122);
+      drawMinimap();
+      drawInventoryPanel();
     }
 
     function render() {
@@ -789,7 +811,7 @@
       else drawRoom();
     }
 
-    function updateTown(dt) {
+    function updateTown() {
       if (state.keys['1']) {
         if (state.town.gold >= 15) {
           state.town.gold -= 15;
@@ -817,6 +839,14 @@
           showToast('Resolve Up');
         }
       }
+      if (state.keys['4']) {
+        if (state.town.gold >= 20) {
+          state.town.gold -= 20;
+          addInventoryItem('Rift Edge', 'weapon', 'rare');
+          state.selectedWeapon = 'Rift Edge';
+          showToast('Weapon forged');
+        }
+      }
       if (state.keys.e) {
         state.mode = 'run';
         initFloor();
@@ -835,7 +865,7 @@
       }
 
       if (state.mode === 'town') {
-        updateTown(dt);
+        updateTown();
       }
 
       if (state.mode === 'run') {
@@ -849,25 +879,21 @@
     }
 
     function bindKeys() {
-      const keyMap = {
+      const keymap = {
         w: 'w', a: 'a', s: 's', d: 'd',
         ArrowUp: 'w', ArrowLeft: 'a', ArrowDown: 's', ArrowRight: 'd',
         ' ': 'space', e: 'e', q: 'q', Enter: 'enter',
-        '1': '1', '2': '2', '3': '3'
+        '1': '1', '2': '2', '3': '3', '4': '4'
       };
 
       window.addEventListener('keydown', (event) => {
-        const key = keyMap[event.key] || event.key.toLowerCase();
-        if (key in state.keys) {
-          state.keys[key] = true;
-        }
+        const key = keymap[event.key] || event.key.toLowerCase();
+        if (key in state.keys) state.keys[key] = true;
       });
 
       window.addEventListener('keyup', (event) => {
-        const key = keyMap[event.key] || event.key.toLowerCase();
-        if (key in state.keys) {
-          state.keys[key] = false;
-        }
+        const key = keymap[event.key] || event.key.toLowerCase();
+        if (key in state.keys) state.keys[key] = false;
       });
     }
 
