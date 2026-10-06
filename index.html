@@ -206,54 +206,30 @@
       maxFloor: 50,
       familyGeneration: 1,
       time: 0,
-      keys: {
-        w: false,
-        a: false,
-        s: false,
-        d: false,
-        space: false,
-        e: false,
-        q: false,
-      },
+      keys: { w:false, a:false, s:false, d:false, space:false, e:false, q:false, enter:false, '1':false, '2':false, '3':false },
       lastTime: 0,
-      roomSize: 7,
+      mapSize: 5,
       rooms: [],
+      currentRoom: null,
       player: null,
       enemies: [],
       projectiles: [],
       loot: [],
-      currentRoom: null,
-      bossDefeated: false,
-      town: {
-        gold: 0,
-        relics: 0,
-        upgrades: {
-          vitality: 0,
-          strength: 0,
-          resolve: 0,
-        },
-      },
-      familyLegacy: {
-        vitality: 0,
-        strength: 0,
-        resolve: 0,
-        bossKills: 0,
-      },
-      townUnlocked: false,
+      floorCleared: false,
+      town: { gold: 0, relics: 0, upgrades: { vitality:0, strength:0, resolve:0 } },
+      familyLegacy: { vitality:0, strength:0, resolve:0, bossKills:0 },
       selectedWeapon: 'Abyss Knife',
-      messageTimer: 0,
-      messageText: '',
       minimap: []
     };
 
     function loadLegacy() {
-      const saved = localStorage.getItem('copilot-ascent-legacy');
-      if (!saved) return;
       try {
-        const data = JSON.parse(saved);
+        const raw = localStorage.getItem('copilot-ascent-legacy');
+        if (!raw) return;
+        const data = JSON.parse(raw);
         state.familyLegacy = { ...state.familyLegacy, ...data };
-      } catch (e) {
-        console.warn('Legacy load failed', e);
+      } catch (err) {
+        console.warn('Legacy load failed', err);
       }
     }
 
@@ -261,7 +237,7 @@
       localStorage.setItem('copilot-ascent-legacy', JSON.stringify(state.familyLegacy));
     }
 
-    function showToast(text, duration = 1600) {
+    function showToast(text, duration = 1500) {
       toastEl.textContent = text;
       toastEl.classList.add('show');
       clearTimeout(showToast.timeoutId);
@@ -272,16 +248,6 @@
       return Math.min(max, Math.max(min, value));
     }
 
-    function dist(a, b) {
-      const dx = a.x - b.x;
-      const dy = a.y - b.y;
-      return Math.hypot(dx, dy);
-    }
-
-    function rectsIntersect(a, b) {
-      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-    }
-
     function randRange(min, max) {
       return Math.random() * (max - min) + min;
     }
@@ -290,305 +256,334 @@
       return Math.floor(randRange(min, max + 1));
     }
 
+    function rectsIntersect(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function distance(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
     function createPlayer() {
       return {
-        x: TILE * 2,
-        y: TILE * 2,
-        w: 20,
-        h: 20,
-        speed: 200,
-        maxHp: 100 + state.familyLegacy.vitality * 8,
-        hp: 100 + state.familyLegacy.vitality * 8,
+        x: GAME_WIDTH * 0.5,
+        y: GAME_HEIGHT * 0.6,
+        w: 22,
+        h: 22,
+        speed: 220,
+        maxHp: 100 + state.familyLegacy.vitality * 10,
+        hp: 100 + state.familyLegacy.vitality * 10,
+        damage: 18 + state.familyLegacy.strength * 2,
         attackCooldown: 0,
-        dashCooldown: 0,
         facingX: 1,
-        facingY: 0,
-        attackReach: 42,
-        damage: 16 + state.familyLegacy.strength * 2,
+        facingY: 0
       };
     }
 
     function createEnemy(type = 'crawler') {
-      const base = {
-        x: randRange(200, GAME_WIDTH - 220),
-        y: randRange(200, GAME_HEIGHT - 200),
+      const enemy = {
+        x: randRange(120, GAME_WIDTH - 150),
+        y: randRange(120, GAME_HEIGHT - 150),
         w: 18,
         h: 18,
-        hp: 30 + state.floor * 6,
-        maxHp: 30 + state.floor * 6,
-        speed: 45 + state.floor * 4,
-        damage: 8 + state.floor,
         type,
-        attackCooldown: 0,
-        drift: Math.random() * Math.PI * 2,
+        hp: 26 + state.floor * 6,
+        maxHp: 26 + state.floor * 6,
+        speed: 45 + state.floor * 3,
+        damage: 8 + state.floor,
+        attackCooldown: 0
       };
 
       if (type === 'brute') {
-        base.w = 24;
-        base.h = 24;
-        base.hp = 75 + state.floor * 8;
-        base.maxHp = base.hp;
-        base.speed = 30 + state.floor * 2;
-        base.damage = 16 + state.floor * 2;
+        enemy.w = 26;
+        enemy.h = 26;
+        enemy.hp = 70 + state.floor * 12;
+        enemy.maxHp = enemy.hp;
+        enemy.speed = 30 + state.floor * 3;
+        enemy.damage = 14 + state.floor * 2;
       }
 
-      return base;
+      return enemy;
     }
 
     function createBoss() {
       return {
-        x: GAME_WIDTH / 2 - 26,
-        y: GAME_HEIGHT / 2 - 36,
-        w: 52,
-        h: 52,
-        hp: 200 + state.floor * 50,
-        maxHp: 200 + state.floor * 50,
-        speed: 60,
-        damage: 18 + state.floor * 2,
+        x: GAME_WIDTH * 0.55,
+        y: GAME_HEIGHT * 0.45,
+        w: 48,
+        h: 48,
         type: 'boss',
-        phase: 0,
+        hp: 220 + state.floor * 55,
+        maxHp: 220 + state.floor * 55,
+        speed: 70 + state.floor * 2,
+        damage: 16 + state.floor * 2,
         attackCooldown: 0,
+        phase: 0
       };
     }
 
     function roomTypeLabel(type) {
       const labels = {
+        start: 'Entry',
         combat: 'Combat',
         treasure: 'Treasure',
-        rest: 'Sanctum',
         shrine: 'Shrine',
-        trap: 'Trap',
+        rest: 'Sanctum',
         boss: 'Boss',
-        start: 'Entry',
-        town: 'Town'
+        empty: 'Hall'
       };
-      return labels[type] || 'Unknown';
+      return labels[type] || 'Hall';
     }
 
     function buildFloor(floorNumber) {
-      const roomCount = 10 + Math.min(10, floorNumber * 2);
-      const rooms = [];
-      const centerX = Math.floor(state.roomSize / 2);
-      const centerY = Math.floor(state.roomSize / 2);
+      const size = state.mapSize;
+      const roomGrid = [];
 
-      for (let y = 0; y < state.roomSize; y++) {
-        for (let x = 0; x < state.roomSize; x++) {
-          const room = {
-            x,
-            y,
+      for (let y = 0; y < size; y++) {
+        const row = [];
+        for (let x = 0; x < size; x++) {
+          row.push({
+            x, y,
             type: 'empty',
+            doors: { n: false, e: false, s: false, w: false },
+            enemies: [],
+            loot: [],
             visited: false,
-            connections: [],
-            enemyCount: 0,
-            hasLoot: false,
-            boss: false,
-            isStart: false
-          };
-          rooms.push(room);
+            boss: false
+          });
         }
+        roomGrid.push(row);
       }
 
-      const start = rooms[centerX + centerY * state.roomSize];
-      start.type = 'start';
-      start.visited = true;
-      start.isStart = true;
+      const startRoom = roomGrid[Math.floor(size / 2)][Math.floor(size / 2)];
+      startRoom.type = 'start';
+      startRoom.visited = true;
 
-      const bossRoom = rooms[Math.floor(Math.random() * rooms.length)];
-      bossRoom.type = 'boss';
-      bossRoom.boss = true;
-
-      const pathRooms = [start];
-      let current = start;
-      for (let i = 0; i < 12; i++) {
-        const options = [];
-        const dirs = [
-          [1,0], [-1,0], [0,1], [0,-1]
-        ];
-        for (const [dx, dy] of dirs) {
-          const nx = current.x + dx;
-          const ny = current.y + dy;
-          if (nx >= 0 && nx < state.roomSize && ny >= 0 && ny < state.roomSize) {
-            const room = rooms[nx + ny * state.roomSize];
-            if (!pathRooms.includes(room)) {
-              options.push(room);
-            }
+      const available = [];
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (x !== Math.floor(size / 2) || y !== Math.floor(size / 2)) {
+            available.push({ x, y });
           }
         }
-        if (options.length === 0) break;
-        const next = options[randInt(0, options.length - 1)];
-        current.connections.push(next);
-        next.connections.push(current);
-        pathRooms.push(next);
-        current = next;
       }
 
-      for (const room of rooms) {
-        if (room === start || room === bossRoom) continue;
-        const roll = Math.random();
-        if (roll < 0.35) room.type = 'combat';
-        else if (roll < 0.55) room.type = 'treasure';
-        else if (roll < 0.70) room.type = 'rest';
-        else if (roll < 0.82) room.type = 'shrine';
-        else room.type = 'empty';
-      }
-
-      bossRoom.type = 'boss';
-      start.type = 'start';
-
-      const floorGrid = [];
-      for (let y = 0; y < state.roomSize; y++) {
-        const row = [];
-        for (let x = 0; x < state.roomSize; x++) {
-          row.push(rooms[x + y * state.roomSize]);
+      let bossRoom = { x: 0, y: 0 };
+      let farthest = -1;
+      for (const pos of available) {
+        const dx = pos.x - Math.floor(size / 2);
+        const dy = pos.y - Math.floor(size / 2);
+        const dist = Math.abs(dx) + Math.abs(dy);
+        if (dist > farthest) {
+          farthest = dist;
+          bossRoom = pos;
         }
-        floorGrid.push(row);
+      }
+      const bossTarget = roomGrid[bossRoom.y][bossRoom.x];
+      bossTarget.type = 'boss';
+      bossTarget.boss = true;
+
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const room = roomGrid[y][x];
+          if (x > 0) room.doors.w = true; roomGrid[y][x - 1].doors.e = true;
+          if (x < size - 1) room.doors.e = true;
+          if (y > 0) room.doors.n = true; roomGrid[y - 1][x].doors.s = true;
+          if (y < size - 1) room.doors.s = true;
+        }
       }
 
-      return floorGrid;
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const room = roomGrid[y][x];
+          if (room.type === 'start' || room.type === 'boss') continue;
+          const roll = Math.random();
+          if (roll < 0.42) room.type = 'combat';
+          else if (roll < 0.62) room.type = 'treasure';
+          else if (roll < 0.78) room.type = 'shrine';
+          else if (roll < 0.9) room.type = 'rest';
+          else room.type = 'empty';
+        }
+      }
+
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const room = roomGrid[y][x];
+          if (room.type === 'start') {
+            room.enemies = [];
+            room.loot = [];
+            continue;
+          }
+          if (room.type === 'combat') {
+            const enemyCount = 2 + Math.floor(Math.random() * 3) + Math.min(3, floorNumber);
+            for (let i = 0; i < enemyCount; i++) {
+              room.enemies.push(createEnemy(Math.random() < 0.25 ? 'brute' : 'crawler'));
+            }
+          }
+          if (room.type === 'treasure') {
+            room.enemies.push(createEnemy(Math.random() < 0.4 ? 'brute' : 'crawler'));
+            room.loot.push({ kind: 'gold', x: GAME_WIDTH * 0.7, y: GAME_HEIGHT * 0.5, w: 10, h: 10 });
+            room.loot.push({ kind: 'relic', x: GAME_WIDTH * 0.3, y: GAME_HEIGHT * 0.5, w: 10, h: 10 });
+          }
+          if (room.type === 'rest') {
+            room.loot.push({ kind: 'heal', x: GAME_WIDTH * 0.5, y: GAME_HEIGHT * 0.5, w: 12, h: 12 });
+          }
+          if (room.type === 'shrine') {
+            room.enemies.push(createEnemy('crawler'));
+            room.loot.push({ kind: 'blessing', x: GAME_WIDTH * 0.5, y: GAME_HEIGHT * 0.5, w: 12, h: 12 });
+          }
+          if (room.type === 'boss') {
+            room.enemies.push(createBoss());
+          }
+        }
+      }
+
+      return roomGrid;
     }
 
-    function generateWorld() {
+    function getRoomAt(x, y) {
+      if (!state.rooms.length) return null;
+      return state.rooms[y]?.[x] || null;
+    }
+
+    function getNeighborRoom(room, dir) {
+      const offsets = { n:[0,-1], e:[1,0], s:[0,1], w:[-1,0] };
+      const [dx, dy] = offsets[dir];
+      return getRoomAt(room.x + dx, room.y + dy);
+    }
+
+    function initFloor() {
       state.rooms = buildFloor(state.floor);
-      state.minimap = state.rooms.map(row => row.map(room => room.type));
+      const start = state.rooms[Math.floor(state.mapSize / 2)][Math.floor(state.mapSize / 2)];
+      state.currentRoom = start;
       state.player = createPlayer();
-      state.enemies = [];
+      state.player.x = GAME_WIDTH * 0.52;
+      state.player.y = GAME_HEIGHT * 0.62;
       state.projectiles = [];
       state.loot = [];
-      state.currentRoom = state.rooms[0][0];
-
-      const startRoom = findRoom('start');
-      const bossRoom = findRoom('boss');
-
-      if (startRoom) {
-        state.player.x = startRoom.x * 140 + 120;
-        state.player.y = startRoom.y * 120 + 140;
-      }
-
-      for (let i = 0; i < 3 + state.floor; i++) {
-        state.enemies.push(createEnemy(Math.random() < 0.25 ? 'brute' : 'crawler'));
-      }
-
-      if (bossRoom) {
-        state.enemies.push(createBoss());
-        state.enemies[state.enemies.length - 1].x = bossRoom.x * 140 + 180;
-        state.enemies[state.enemies.length - 1].y = bossRoom.y * 120 + 200;
-      }
-
-      state.bossDefeated = false;
-      state.townUnlocked = true;
+      state.floorCleared = false;
+      state.enemies = [...state.currentRoom.enemies];
       ui.floorValue.textContent = state.floor;
       ui.familyValue.textContent = 'Gen ' + state.familyGeneration;
       ui.healthValue.textContent = `${Math.ceil(state.player.hp)} / ${state.player.maxHp}`;
       ui.weaponValue.textContent = state.selectedWeapon;
     }
 
-    function findRoom(type) {
-      for (const row of state.rooms) {
-        for (const room of row) {
-          if (room.type === type) return room;
-        }
-      }
-      return null;
+    function tryTransition(direction) {
+      const room = state.currentRoom;
+      if (!room || !room.doors[direction]) return false;
+      const next = getNeighborRoom(room, direction);
+      if (!next) return false;
+
+      state.currentRoom = next;
+      state.enemies = [...next.enemies];
+      state.loot = [...next.loot];
+
+      const spawn = {
+        n: { x: GAME_WIDTH * 0.5, y: GAME_HEIGHT - 70 },
+        s: { x: GAME_WIDTH * 0.5, y: 70 },
+        e: { x: 75, y: GAME_HEIGHT * 0.5 },
+        w: { x: GAME_WIDTH - 90, y: GAME_HEIGHT * 0.5 }
+      };
+
+      const pos = spawn[direction];
+      state.player.x = pos.x;
+      state.player.y = pos.y;
+      showToast(roomTypeLabel(next.type));
+      return true;
     }
 
-    function spawnLoot(x, y) {
-      state.loot.push({ x, y, w: 14, h: 14, type: Math.random() < 0.6 ? 'gold' : 'relic' });
-    }
+    function handleRoomTransitionInput() {
+      const doorChecks = [
+        ['n', state.keys.w],
+        ['s', state.keys.s],
+        ['e', state.keys.d],
+        ['w', state.keys.a]
+      ];
 
-    function handleInput(dt) {
-      const moveX = (state.keys.d ? 1 : 0) - (state.keys.a ? 1 : 0);
-      const moveY = (state.keys.s ? 1 : 0) - (state.keys.w ? 1 : 0);
-      const len = Math.hypot(moveX, moveY) || 1;
-
-      if (moveX !== 0 || moveY !== 0) {
-        state.player.x += (moveX / len) * state.player.speed * dt;
-        state.player.y += (moveY / len) * state.player.speed * dt;
-        state.player.facingX = moveX;
-        state.player.facingY = moveY;
-      }
-
-      const attackPressed = state.keys.space;
-      if (attackPressed && state.player.attackCooldown <= 0) {
-        state.player.attackCooldown = 0.36;
-        const atkX = state.player.x + (state.player.facingX || 1) * 26;
-        const atkY = state.player.y + (state.player.facingY || 0) * 26;
-        state.projectiles.push({
-          x: state.player.x,
-          y: state.player.y,
-          w: 10,
-          h: 10,
-          dx: (state.player.facingX || 1) * 420,
-          dy: (state.player.facingY || 0) * 420,
-          life: 0.38,
-          owner: 'player',
-          damage: state.player.damage,
-        });
-
-        for (const enemy of state.enemies) {
-          const hit = dist(state.player, enemy) < 60;
-          if (hit) {
-            enemy.hp -= state.player.damage;
+      for (const [dir, pressed] of doorChecks) {
+        if (pressed && state.currentRoom.doors[dir]) {
+          const px = state.player.x;
+          const py = state.player.y;
+          const nearDoor = (
+            (dir === 'n' && py < 56 && px > GAME_WIDTH * 0.42 && px < GAME_WIDTH * 0.58) ||
+            (dir === 's' && py > GAME_HEIGHT - 68 && px > GAME_WIDTH * 0.42 && px < GAME_WIDTH * 0.58) ||
+            (dir === 'e' && px > GAME_WIDTH - 78 && py > GAME_HEIGHT * 0.42 && py < GAME_HEIGHT * 0.58) ||
+            (dir === 'w' && px < 78 && py > GAME_HEIGHT * 0.42 && py < GAME_HEIGHT * 0.58)
+          );
+          if (nearDoor) {
+            tryTransition(dir);
+            return;
           }
         }
-      }
-
-      if (state.keys.e && state.mode === 'town') {
-        state.mode = 'run';
-        state.townUnlocked = false;
-        showToast('Tower Access');
-      }
-
-      if (state.keys.q && state.mode === 'run') {
-        state.mode = 'town';
-        showToast('Returning to town');
       }
     }
 
     function updatePlayer(dt) {
-      const p = state.player;
-      p.attackCooldown = Math.max(0, p.attackCooldown - dt);
-      p.dashCooldown = Math.max(0, p.dashCooldown - dt);
+      const player = state.player;
+      player.attackCooldown = Math.max(0, player.attackCooldown - dt);
 
-      p.x = clamp(p.x, 12, GAME_WIDTH - 40);
-      p.y = clamp(p.y, 12, GAME_HEIGHT - 40);
+      const dx = (state.keys.d ? 1 : 0) - (state.keys.a ? 1 : 0);
+      const dy = (state.keys.s ? 1 : 0) - (state.keys.w ? 1 : 0);
+      if (dx !== 0 || dy !== 0) {
+        const len = Math.hypot(dx, dy) || 1;
+        const moveX = (dx / len) * player.speed * dt;
+        const moveY = (dy / len) * player.speed * dt;
+        player.x = clamp(player.x + moveX, 40, GAME_WIDTH - 45);
+        player.y = clamp(player.y + moveY, 40, GAME_HEIGHT - 45);
 
-      if (state.mode !== 'run') return;
+        if (Math.abs(dx) > Math.abs(dy)) player.facingX = dx;
+        else player.facingY = dy;
+        if (dx !== 0) player.facingX = dx;
+        if (dy !== 0) player.facingY = dy;
+      }
 
-      handleInput(dt);
+      if (state.keys.space && player.attackCooldown <= 0) {
+        player.attackCooldown = 0.3;
 
-      state.projectiles.forEach(projectile => {
+        const projSpeed = 520;
+        const dxDir = player.facingX || 1;
+        const dyDir = player.facingY || 0;
+        state.projectiles.push({
+          x: player.x,
+          y: player.y,
+          w: 10,
+          h: 10,
+          dx: dxDir * projSpeed,
+          dy: dyDir * projSpeed,
+          life: 0.45,
+          owner: 'player',
+          damage: player.damage
+        });
+      }
+
+      handleRoomTransitionInput();
+
+      for (const projectile of state.projectiles) {
         projectile.x += projectile.dx * dt;
         projectile.y += projectile.dy * dt;
         projectile.life -= dt;
-      });
+      }
+      state.projectiles = state.projectiles.filter(p => p.life > 0 && p.x > 0 && p.x < GAME_WIDTH && p.y > 0 && p.y < GAME_HEIGHT);
 
-      state.projectiles = state.projectiles.filter(pj => pj.life > 0 && pj.x > -20 && pj.x < GAME_WIDTH + 20 && pj.y > -20 && pj.y < GAME_HEIGHT + 20);
-
-      // enemy AI
       for (const enemy of state.enemies) {
         enemy.attackCooldown = Math.max(0, enemy.attackCooldown - dt);
-        if (enemy.type === 'boss') {
-          enemy.phase += dt;
+        const ex = enemy.x - player.x;
+        const ey = enemy.y - player.y;
+        const len = Math.hypot(ex, ey) || 1;
+        if (len < 260) {
+          enemy.x += (ex / len) * enemy.speed * dt;
+          enemy.y += (ey / len) * enemy.speed * dt;
         }
 
-        const dx = state.player.x - enemy.x;
-        const dy = state.player.y - enemy.y;
-        const len = Math.hypot(dx, dy) || 1;
-
-        if (len < 240) {
-          enemy.x += (dx / len) * enemy.speed * dt;
-          enemy.y += (dy / len) * enemy.speed * dt;
-        }
-
-        if (len < 36 && enemy.attackCooldown <= 0) {
-          state.player.hp -= enemy.damage;
-          enemy.attackCooldown = 0.8;
+        if (len < 26 && enemy.attackCooldown <= 0) {
+          player.hp -= enemy.damage;
+          enemy.attackCooldown = 0.9;
         }
 
         for (const projectile of state.projectiles) {
           if (projectile.owner === 'player') {
-            const hit = rectsIntersect({ x: projectile.x, y: projectile.y, w: projectile.w, h: projectile.h }, { x: enemy.x, y: enemy.y, w: enemy.w, h: enemy.h });
-            if (hit) {
+            if (rectsIntersect({ x: projectile.x, y: projectile.y, w: projectile.w, h: projectile.h }, { x: enemy.x, y: enemy.y, w: enemy.w, h: enemy.h })) {
               enemy.hp -= projectile.damage;
               projectile.life = 0;
             }
@@ -599,41 +594,46 @@
       state.enemies = state.enemies.filter(enemy => {
         if (enemy.hp <= 0) {
           if (enemy.type === 'boss') {
-            state.bossDefeated = true;
-            showToast('Floor Cleared');
+            state.floorCleared = true;
             state.familyLegacy.bossKills += 1;
             saveLegacy();
-            state.player.hp = state.player.maxHp;
-            state.floor += 1;
-            if (state.floor > state.maxFloor) {
+            if (state.floor >= state.maxFloor) {
               state.mode = 'title';
-              showToast('The Curse Is Broken');
               state.floor = 1;
+              showToast('The curse is broken');
             } else {
-              generateWorld();
+              state.floor += 1;
+              initFloor();
+              showToast('Floor cleared');
             }
           } else {
-            spawnLoot(enemy.x, enemy.y);
+            state.loot.push({ kind: 'gold', x: enemy.x, y: enemy.y, w: 12, h: 12 });
           }
           return false;
         }
         return true;
       });
 
-      for (const lootItem of state.loot) {
-        if (rectsIntersect({ x: state.player.x, y: state.player.y, w: state.player.w, h: state.player.h }, { x: lootItem.x, y: lootItem.y, w: lootItem.w, h: lootItem.h })) {
-          if (lootItem.type === 'gold') {
-            state.town.gold += 8;
-          } else {
-            state.familyLegacy.resolve += 1;
-            state.selectedWeapon = 'Cursed Spear';
+      for (const item of state.loot) {
+        if (rectsIntersect({ x: player.x, y: player.y, w: player.w, h: player.h }, { x: item.x, y: item.y, w: item.w, h: item.h })) {
+          if (item.kind === 'gold') {
+            state.town.gold += 10;
           }
-          lootItem.collected = true;
+          if (item.kind === 'relic') {
+            state.familyLegacy.resolve += 1;
+          }
+          if (item.kind === 'heal') {
+            player.hp = player.maxHp;
+          }
+          if (item.kind === 'blessing') {
+            state.familyLegacy.vitality += 1;
+          }
+          item.collected = true;
         }
       }
       state.loot = state.loot.filter(item => !item.collected);
 
-      if (state.player.hp <= 0) {
+      if (player.hp <= 0) {
         state.familyGeneration += 1;
         state.familyLegacy.vitality += 1;
         state.familyLegacy.strength += 1;
@@ -642,14 +642,17 @@
         state.mode = 'town';
         state.floor = Math.max(1, state.floor - 1);
         state.player = createPlayer();
-        state.player.hp = state.player.maxHp;
-        ui.floorValue.textContent = state.floor;
-        ui.familyValue.textContent = 'Gen ' + state.familyGeneration;
         showToast('The next heir rises');
       }
 
-      ui.healthValue.textContent = `${Math.ceil(state.player.hp)} / ${state.player.maxHp}`;
+      ui.healthValue.textContent = `${Math.ceil(player.hp)} / ${player.maxHp}`;
       ui.weaponValue.textContent = state.selectedWeapon;
+      ui.familyValue.textContent = 'Gen ' + state.familyGeneration;
+    }
+
+    function drawDoor(x, y, w, h, active) {
+      ctx.fillStyle = active ? '#67e8f9' : '#1e293b';
+      ctx.fillRect(x, y, w, h);
     }
 
     function renderTitle() {
@@ -665,8 +668,7 @@
       ctx.fillStyle = '#dfefff';
       ctx.fillText('A rogue-like ascent through a cursed tower', GAME_WIDTH / 2, 250);
       ctx.fillText('Press ENTER to begin', GAME_WIDTH / 2, 340);
-      ctx.fillText('WASD to move, SPACE to strike, Q to town, E to enter', GAME_WIDTH / 2, 380);
-
+      ctx.fillText('WASD to move, SPACE to strike, E to pass through doors', GAME_WIDTH / 2, 380);
       ctx.fillText('Survive floor 50 and lift the family curse.', GAME_WIDTH / 2, 430);
       ctx.fillStyle = '#67e8f9';
       ctx.fillText('Legacy: ' + state.familyGeneration + ' generation', GAME_WIDTH / 2, 500);
@@ -714,159 +716,136 @@
       ctx.fillText('Family Blessing: ' + state.familyLegacy.bossKills + ' bosses defeated', GAME_WIDTH / 2, 610);
     }
 
-    function renderRun() {
-      ctx.fillStyle = '#0a1320';
+    function drawRoom() {
+      const room = state.currentRoom;
+      if (!room) return;
+
+      const bg = room.type === 'boss' ? '#120d18' : room.type === 'shrine' ? '#161629' : room.type === 'rest' ? '#112220' : '#0d1826';
+      ctx.fillStyle = bg;
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-      // floor background
-      const gradient = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
-      gradient.addColorStop(0, '#101b2b');
-      gradient.addColorStop(1, '#050c17');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
-      // draw room grid
-      const roomCols = 7;
-      const roomWidth = 150;
-      const roomHeight = 110;
-      const startX = 160;
-      const startY = 100;
-
-      for (let y = 0; y < state.roomSize; y++) {
-        for (let x = 0; x < state.roomSize; x++) {
-          const room = state.rooms[y][x];
-          const rx = startX + x * roomWidth;
-          const ry = startY + y * roomHeight;
-          const selected = room.type === 'boss' || room.type === 'start';
-
-          ctx.fillStyle = selected ? '#1d3a52' : '#16273b';
-          ctx.fillRect(rx, ry, roomWidth - 6, roomHeight - 6);
-          ctx.strokeStyle = 'rgba(125, 211, 252, 0.35)';
-          ctx.strokeRect(rx, ry, roomWidth - 6, roomHeight - 6);
-
-          ctx.fillStyle = '#dfefff';
-          ctx.font = '12px Segoe UI';
-          ctx.fillText(roomTypeLabel(room.type), rx + 12, ry + 22);
+      ctx.fillStyle = 'rgba(125, 211, 252, 0.06)';
+      for (let x = 0; x < GAME_WIDTH; x += 34) {
+        for (let y = 0; y < GAME_HEIGHT; y += 34) {
+          ctx.fillRect(x, y, 2, 2);
         }
       }
 
-      // player
-      ctx.fillStyle = '#7dd3fc';
-      ctx.fillRect(state.player.x, state.player.y, state.player.w, state.player.h);
+      ctx.strokeStyle = 'rgba(125, 211, 252, 0.8)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(24, 24, GAME_WIDTH - 48, GAME_HEIGHT - 48);
 
-      // enemies
+      const doorSize = 52;
+      if (room.doors.n) drawDoor((GAME_WIDTH - doorSize) * 0.5, 10, doorSize, 18, true);
+      if (room.doors.s) drawDoor((GAME_WIDTH - doorSize) * 0.5, GAME_HEIGHT - 28, doorSize, 18, true);
+      if (room.doors.e) drawDoor(GAME_WIDTH - 28, (GAME_HEIGHT - doorSize) * 0.5, 18, doorSize, true);
+      if (room.doors.w) drawDoor(10, (GAME_HEIGHT - doorSize) * 0.5, 18, doorSize, true);
+
+      for (const item of state.loot) {
+        const color = item.kind === 'gold' ? '#fbbf24' : item.kind === 'heal' ? '#22c55e' : '#a78bfa';
+        ctx.fillStyle = color;
+        ctx.fillRect(item.x, item.y, item.w, item.h);
+      }
+
       for (const enemy of state.enemies) {
         ctx.fillStyle = enemy.type === 'boss' ? '#f59e0b' : '#ef4444';
         ctx.fillRect(enemy.x, enemy.y, enemy.w, enemy.h);
       }
 
-      // projectiles
       for (const projectile of state.projectiles) {
         ctx.fillStyle = '#fbbf24';
         ctx.fillRect(projectile.x, projectile.y, projectile.w, projectile.h);
       }
 
-      // loot
-      for (const item of state.loot) {
-        ctx.fillStyle = item.type === 'gold' ? '#fbbf24' : '#a78bfa';
-        ctx.fillRect(item.x, item.y, item.w, item.h);
-      }
+      ctx.fillStyle = '#7dd3fc';
+      ctx.fillRect(state.player.x, state.player.y, state.player.w, state.player.h);
 
-      // floor info panel
       ctx.fillStyle = 'rgba(10, 16, 24, 0.8)';
-      ctx.fillRect(18, 18, 180, 80);
+      ctx.fillRect(18, 18, 210, 90);
       ctx.fillStyle = '#dfefff';
       ctx.font = '16px Segoe UI';
       ctx.fillText('Floor ' + state.floor, 30, 42);
-      ctx.fillText('Heir: ' + state.familyGeneration, 30, 62);
-      ctx.fillText('HP: ' + Math.ceil(state.player.hp), 30, 82);
+      ctx.fillText(roomTypeLabel(room.type), 30, 68);
+      ctx.fillText('HP: ' + Math.ceil(state.player.hp), 30, 94);
 
-      // minimap or objective
       ctx.fillStyle = 'rgba(10, 16, 24, 0.8)';
       ctx.fillRect(GAME_WIDTH - 220, 20, 190, 120);
       ctx.fillStyle = '#dfefff';
       ctx.font = '14px Segoe UI';
-      ctx.fillText('Objective', GAME_WIDTH - 180, 42);
-      if (state.bossDefeated) {
-        ctx.fillText('Boss defeated', GAME_WIDTH - 180, 60);
+      ctx.fillText('Objective', GAME_WIDTH - 175, 42);
+      if (room.type === 'boss') {
+        ctx.fillText('Defeat the boss', GAME_WIDTH - 175, 62);
       } else {
-        ctx.fillText('Reach the boss', GAME_WIDTH - 180, 60);
+        ctx.fillText('Clear the room', GAME_WIDTH - 175, 62);
       }
-      ctx.fillText('Town: Q', GAME_WIDTH - 180, 80);
-      ctx.fillText('Attack: Space', GAME_WIDTH - 180, 100);
+      ctx.fillText('Move: WASD', GAME_WIDTH - 175, 82);
+      ctx.fillText('Attack: SPACE', GAME_WIDTH - 175, 102);
+      ctx.fillText('Town: Q', GAME_WIDTH - 175, 122);
     }
 
     function render() {
       if (state.mode === 'title') renderTitle();
       else if (state.mode === 'town') renderTown();
-      else renderRun();
+      else drawRoom();
+    }
+
+    function updateTown(dt) {
+      if (state.keys['1']) {
+        if (state.town.gold >= 15) {
+          state.town.gold -= 15;
+          state.town.upgrades.vitality += 1;
+          state.familyLegacy.vitality += 1;
+          saveLegacy();
+          showToast('Vitality Up');
+        }
+      }
+      if (state.keys['2']) {
+        if (state.town.gold >= 15) {
+          state.town.gold -= 15;
+          state.town.upgrades.strength += 1;
+          state.familyLegacy.strength += 1;
+          saveLegacy();
+          showToast('Strength Up');
+        }
+      }
+      if (state.keys['3']) {
+        if (state.town.gold >= 15) {
+          state.town.gold -= 15;
+          state.town.upgrades.resolve += 1;
+          state.familyLegacy.resolve += 1;
+          saveLegacy();
+          showToast('Resolve Up');
+        }
+      }
+      if (state.keys.e) {
+        state.mode = 'run';
+        initFloor();
+        showToast('Tower access');
+      }
     }
 
     function update(dt) {
       state.time += dt;
 
+      if (state.mode === 'title' && state.keys.enter) {
+        state.mode = 'run';
+        state.floor = 1;
+        initFloor();
+        showToast('The ascent begins');
+      }
+
+      if (state.mode === 'town') {
+        updateTown(dt);
+      }
+
       if (state.mode === 'run') {
         updatePlayer(dt);
       }
 
-      if (state.mode === 'title' && state.keys.space) {
-        state.mode = 'run';
-        state.floor = 1;
-        generateWorld();
-        showToast('The ascent begins');
+      if (state.keys.q && state.mode === 'run') {
+        state.mode = 'town';
+        showToast('Back to town');
       }
-
-      if (state.mode === 'title' && state.keys.enter) {
-        state.mode = 'run';
-        state.floor = 1;
-        generateWorld();
-      }
-
-      if (state.mode === 'town') {
-        if (state.keys['1']) {
-          if (state.town.gold >= 15) {
-            state.town.gold -= 15;
-            state.town.upgrades.vitality += 1;
-            state.familyLegacy.vitality += 1;
-            saveLegacy();
-            showToast('Vitality Up');
-          }
-        }
-
-        if (state.keys['2']) {
-          if (state.town.gold >= 15) {
-            state.town.gold -= 15;
-            state.town.upgrades.strength += 1;
-            state.familyLegacy.strength += 1;
-            saveLegacy();
-            showToast('Strength Up');
-          }
-        }
-
-        if (state.keys['3']) {
-          if (state.town.gold >= 15) {
-            state.town.gold -= 15;
-            state.town.upgrades.resolve += 1;
-            state.familyLegacy.resolve += 1;
-            saveLegacy();
-            showToast('Resolve Up');
-          }
-        }
-
-        if (state.keys.e) {
-          state.mode = 'run';
-          generateWorld();
-          showToast('Tower Access');
-        }
-      }
-    }
-
-    function loop(timestamp) {
-      const dt = Math.min(0.032, (timestamp - state.lastTime) / 1000 || 0.016);
-      state.lastTime = timestamp;
-      update(dt);
-      render();
-      requestAnimationFrame(loop);
     }
 
     function bindKeys() {
@@ -892,9 +871,17 @@
       });
     }
 
+    function loop(timestamp) {
+      const dt = Math.min(0.032, (timestamp - state.lastTime) / 1000 || 0.016);
+      state.lastTime = timestamp;
+      update(dt);
+      render();
+      requestAnimationFrame(loop);
+    }
+
     loadLegacy();
     bindKeys();
-    generateWorld();
+    initFloor();
     state.mode = 'title';
     requestAnimationFrame(loop);
   </script>
