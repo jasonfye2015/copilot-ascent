@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Copilot Ascent</title>
+  <style>
+    :root {
+      --bg: #0a0f1a;
+      --panel: #111d2d;
+      --panel2: #1b2b3f;
+      --line: #7dd3fc;
+      --accent: #67e8f9;
+      --accent2: #22c55e;
+      --danger: #ef4444;
+      --gold: #fbbf24;
+      --text: #dfefff;
+      --shadow: rgba(0, 0, 0, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      background: radial-gradient(circle at top, #101c2a, var(--bg) 55%);
+      color: var(--text);
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      overflow: hidden;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    #game-shell {
+      position: relative;
+      width: min(92vw, 1200px);
+      height: min(92vh, 760px);
+      background: linear-gradient(180deg, rgba(17,29,45,0.98), rgba(9,16,26,0.98));
+      border: 3px solid var(--line);
+      box-shadow: 0 0 0 4px rgba(125,211,252,0.15), 0 18px 40px var(--shadow);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #0b1120;
+    }
+
+    .hud {
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      right: 16px;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      pointer-events: none;
+    }
+
+    .panel {
+      background: rgba(16,22,33,0.72);
+      border: 1px solid rgba(125,211,252,0.6);
+      border-radius: 8px;
+      padding: 8px 12px;
+      box-shadow: 0 0 10px rgba(34,197,94,0.16);
+      backdrop-filter: blur(2px);
+      min-width: 180px;
+    }
+
+    .title {
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 4px;
+      opacity: 0.85;
+    }
+
+    .value {
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--text);
+    }
+
+    .small {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.8;
+    }
+
+    .crosshair {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 16px;
+      height: 16px;
+      pointer-events: none;
+      opacity: 0.5;
+    }
+
+    .crosshair::before,
+    .crosshair::after {
+      content: "";
+      position: absolute;
+      background: rgba(125,211,252,0.7);
+    }
+
+    .crosshair::before {
+      left: 7px;
+      top: 0;
+      width: 2px;
+      height: 16px;
+    }
+
+    .crosshair::after {
+      left: 0;
+      top: 7px;
+      width: 16px;
+      height: 2px;
+    }
+
+    .toast {
+      position: absolute;
+      left: 50%;
+      bottom: 20px;
+      transform: translateX(-50%);
+      background: rgba(11,17,32,0.88);
+      border: 1px solid rgba(125,211,252,0.7);
+      color: var(--text);
+      padding: 10px 16px;
+      border-radius: 999px;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      pointer-events: none;
+      box-shadow: 0 0 18px rgba(125,211,252,0.14);
+    }
+
+    .toast.show {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-shell">
+    <canvas id="gameCanvas" width="1200" height="760"></canvas>
+
+    <div class="hud">
+      <div class="panel">
+        <div class="title">Floor</div>
+        <div id="floorValue" class="value">1</div>
+      </div>
+
+      <div class="panel">
+        <div class="title">Family Line</div>
+        <div id="familyValue" class="value">I</div>
+      </div>
+
+      <div class="panel">
+        <div class="title">Health</div>
+        <div id="healthValue" class="value">100 / 100</div>
+      </div>
+
+      <div class="panel">
+        <div class="title">Weapon</div>
+        <div id="weaponValue" class="value">Abyss Knife</div>
+      </div>
+    </div>
+
+    <div class="crosshair"></div>
+    <div id="toast" class="toast">Town Access</div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const toastEl = document.getElementById('toast');
+
+    const ui = {
+      floorValue: document.getElementById('floorValue'),
+      familyValue: document.getElementById('familyValue'),
+      healthValue: document.getElementById('healthValue'),
+      weaponValue: document.getElementById('weaponValue')
+    };
+
+    const GAME_WIDTH = canvas.width;
+    const GAME_HEIGHT = canvas.height;
+    const TILE = 64;
+
+    const state = {
+      mode: 'title',
+      floor: 1,
+      maxFloor: 50,
+      familyGeneration: 1,
+      time: 0,
+      keys: {
+        w: false,
+        a: false,
+        s: false,
+        d: false,
+        space: false,
+        e: false,
+        q: false,
+      },
+      lastTime: 0,
+      roomSize: 7,
+      rooms: [],
+      player: null,
+      enemies: [],
+      projectiles: [],
+      loot: [],
+      currentRoom: null,
+      bossDefeated: false,
+      town: {
+        gold: 0,
+        relics: 0,
+        upgrades: {
+          vitality: 0,
+          strength: 0,
+          resolve: 0,
+        },
+      },
+      familyLegacy: {
+        vitality: 0,
+        strength: 0,
+        resolve: 0,
+        bossKills: 0,
+      },
+      townUnlocked: false,
+      selectedWeapon: 'Abyss Knife',
+      messageTimer: 0,
+      messageText: '',
+      minimap: []
+    };
+
+    function loadLegacy() {
+      const saved = localStorage.getItem('copilot-ascent-legacy');
+      if (!saved) return;
+      try {
+        const data = JSON.parse(saved);
+        state.familyLegacy = { ...state.familyLegacy, ...data };
+      } catch (e) {
+        console.warn('Legacy load failed', e);
+      }
+    }
+
+    function saveLegacy() {
+      localStorage.setItem('copilot-ascent-legacy', JSON.stringify(state.familyLegacy));
+    }
+
+    function showToast(text, duration = 1600) {
+      toastEl.textContent = text;
+      toastEl.classList.add('show');
+      clearTimeout(showToast.timeoutId);
+      showToast.timeoutId = setTimeout(() => toastEl.classList.remove('show'), duration);
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function dist(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return Math.hypot(dx, dy);
+    }
+
+    function rectsIntersect(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function randRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function randInt(min, max) {
+      return Math.floor(randRange(min, max + 1));
+    }
+
+    function createPlayer() {
+      return {
+        x: TILE * 2,
+        y: TILE * 2,
+        w: 20,
+        h: 20,
+        speed: 200,
+        maxHp: 100 + state.familyLegacy.vitality * 8,
+        hp: 100 + state.familyLegacy.vitality * 8,
+        attackCooldown: 0,
+        dashCooldown: 0,
+        facingX: 1,
+        facingY: 0,
+        attackReach: 42,
+        damage: 16 + state.familyLegacy.strength * 2,
+      };
+    }
+
+    function createEnemy(type = 'crawler') {
+      const base = {
+        x: randRange(200, GAME_WIDTH - 220),
+        y: randRange(200, GAME_HEIGHT - 200),
+        w: 18,
+        h: 18,
+        hp: 30 + state.floor * 6,
+        maxHp: 30 + state.floor * 6,
+        speed: 45 + state.floor * 4,
+        damage: 8 + state.floor,
+        type,
+        attackCooldown: 0,
+        drift: Math.random() * Math.PI * 2,
+      };
+
+      if (type === 'brute') {
+        base.w = 24;
+        base.h = 24;
+        base.hp = 75 + state.floor * 8;
+        base.maxHp = base.hp;
+        base.speed = 30 + state.floor * 2;
+        base.damage = 16 + state.floor * 2;
+      }
+
+      return base;
+    }
+
+    function createBoss() {
+      return {
+        x: GAME_WIDTH / 2 - 26,
+        y: GAME_HEIGHT / 2 - 36,
+        w: 52,
+        h: 52,
+        hp: 200 + state.floor * 50,
+        maxHp: 200 + state.floor * 50,
+        speed: 60,
+        damage: 18 + state.floor * 2,
+        type: 'boss',
+        phase: 0,
+        attackCooldown: 0,
+      };
+    }
+
+    function roomTypeLabel(type) {
+      const labels = {
+        combat: 'Combat',
+        treasure: 'Treasure',
+        rest: 'Sanctum',
+        shrine: 'Shrine',
+        trap: 'Trap',
+        boss: 'Boss',
+        start: 'Entry',
+        town: 'Town'
+      };
+      return labels[type] || 'Unknown';
+    }
+
+    function buildFloor(floorNumber) {
+      const roomCount = 10 + Math.min(10, floorNumber * 2);
+      const rooms = [];
+      const centerX = Math.floor(state.roomSize / 2);
+      const centerY = Math.floor(state.roomSize / 2);
+
+      for (let y = 0; y < state.roomSize; y++) {
+        for (let x = 0; x < state.roomSize; x++) {
+          const room = {
+            x,
+            y,
+            type: 'empty',
+            visited: false,
+            connections: [],
+            enemyCount: 0,
+            hasLoot: false,
+            boss: false,
+            isStart: false
+          };
+          rooms.push(room);
+        }
+      }
+
+      const start = rooms[centerX + centerY * state.roomSize];
+      start.type = 'start';
+      start.visited = true;
+      start.isStart = true;
+
+      const bossRoom = rooms[Math.floor(Math.random() * rooms.length)];
+      bossRoom.type = 'boss';
+      bossRoom.boss = true;
+
+      const pathRooms = [start];
+      let current = start;
+      for (let i = 0; i < 12; i++) {
+        const options = [];
+        const dirs = [
+          [1,0], [-1,0], [0,1], [0,-1]
+        ];
+        for (const [dx, dy] of dirs) {
+          const nx = current.x + dx;
+          const ny = current.y + dy;
+          if (nx >= 0 && nx < state.roomSize && ny >= 0 && ny < state.roomSize) {
+            const room = rooms[nx + ny * state.roomSize];
+            if (!pathRooms.includes(room)) {
+              options.push(room);
+            }
+          }
+        }
+        if (options.length === 0) break;
+        const next = options[randInt(0, options.length - 1)];
+        current.connections.push(next);
+        next.connections.push(current);
+        pathRooms.push(next);
+        current = next;
+      }
+
+      for (const room of rooms) {
+        if (room === start || room === bossRoom) continue;
+        const roll = Math.random();
+        if (roll < 0.35) room.type = 'combat';
+        else if (roll < 0.55) room.type = 'treasure';
+        else if (roll < 0.70) room.type = 'rest';
+        else if (roll < 0.82) room.type = 'shrine';
+        else room.type = 'empty';
+      }
+
+      bossRoom.type = 'boss';
+      start.type = 'start';
+
+      const floorGrid = [];
+      for (let y = 0; y < state.roomSize; y++) {
+        const row = [];
+        for (let x = 0; x < state.roomSize; x++) {
+          row.push(rooms[x + y * state.roomSize]);
+        }
+        floorGrid.push(row);
+      }
+
+      return floorGrid;
+    }
+
+    function generateWorld() {
+      state.rooms = buildFloor(state.floor);
+      state.minimap = state.rooms.map(row => row.map(room => room.type));
+      state.player = createPlayer();
+      state.enemies = [];
+      state.projectiles = [];
+      state.loot = [];
+      state.currentRoom = state.rooms[0][0];
+
+      const startRoom = findRoom('start');
+      const bossRoom = findRoom('boss');
+
+      if (startRoom) {
+        state.player.x = startRoom.x * 140 + 120;
+        state.player.y = startRoom.y * 120 + 140;
+      }
+
+      for (let i = 0; i < 3 + state.floor; i++) {
+        state.enemies.push(createEnemy(Math.random() < 0.25 ? 'brute' : 'crawler'));
+      }
+
+      if (bossRoom) {
+        state.enemies.push(createBoss());
+        state.enemies[state.enemies.length - 1].x = bossRoom.x * 140 + 180;
+        state.enemies[state.enemies.length - 1].y = bossRoom.y * 120 + 200;
+      }
+
+      state.bossDefeated = false;
+      state.townUnlocked = true;
+      ui.floorValue.textContent = state.floor;
+      ui.familyValue.textContent = 'Gen ' + state.familyGeneration;
+      ui.healthValue.textContent = `${Math.ceil(state.player.hp)} / ${state.player.maxHp}`;
+      ui.weaponValue.textContent = state.selectedWeapon;
+    }
+
+    function findRoom(type) {
+      for (const row of state.rooms) {
+        for (const room of row) {
+          if (room.type === type) return room;
+        }
+      }
+      return null;
+    }
+
+    function spawnLoot(x, y) {
+      state.loot.push({ x, y, w: 14, h: 14, type: Math.random() < 0.6 ? 'gold' : 'relic' });
+    }
+
+    function handleInput(dt) {
+      const moveX = (state.keys.d ? 1 : 0) - (state.keys.a ? 1 : 0);
+      const moveY = (state.keys.s ? 1 : 0) - (state.keys.w ? 1 : 0);
+      const len = Math.hypot(moveX, moveY) || 1;
+
+      if (moveX !== 0 || moveY !== 0) {
+        state.player.x += (moveX / len) * state.player.speed * dt;
+        state.player.y += (moveY / len) * state.player.speed * dt;
+        state.player.facingX = moveX;
+        state.player.facingY = moveY;
+      }
+
+      const attackPressed = state.keys.space;
+      if (attackPressed && state.player.attackCooldown <= 0) {
+        state.player.attackCooldown = 0.36;
+        const atkX = state.player.x + (state.player.facingX || 1) * 26;
+        const atkY = state.player.y + (state.player.facingY || 0) * 26;
+        state.projectiles.push({
+          x: state.player.x,
+          y: state.player.y,
+          w: 10,
+          h: 10,
+          dx: (state.player.facingX || 1) * 420,
+          dy: (state.player.facingY || 0) * 420,
+          life: 0.38,
+          owner: 'player',
+          damage: state.player.damage,
+        });
+
+        for (const enemy of state.enemies) {
+          const hit = dist(state.player, enemy) < 60;
+          if (hit) {
+            enemy.hp -= state.player.damage;
+          }
+        }
+      }
+
+      if (state.keys.e && state.mode === 'town') {
+        state.mode = 'run';
+        state.townUnlocked = false;
+        showToast('Tower Access');
+      }
+
+      if (state.keys.q && state.mode === 'run') {
+        state.mode = 'town';
+        showToast('Returning to town');
+      }
+    }
+
+    function updatePlayer(dt) {
+      const p = state.player;
+      p.attackCooldown = Math.max(0, p.attackCooldown - dt);
+      p.dashCooldown = Math.max(0, p.dashCooldown - dt);
+
+      p.x = clamp(p.x, 12, GAME_WIDTH - 40);
+      p.y = clamp(p.y, 12, GAME_HEIGHT - 40);
+
+      if (state.mode !== 'run') return;
+
+      handleInput(dt);
+
+      state.projectiles.forEach(projectile => {
+        projectile.x += projectile.dx * dt;
+        projectile.y += projectile.dy * dt;
+        projectile.life -= dt;
+      });
+
+      state.projectiles = state.projectiles.filter(pj => pj.life > 0 && pj.x > -20 && pj.x < GAME_WIDTH + 20 && pj.y > -20 && pj.y < GAME_HEIGHT + 20);
+
+      // enemy AI
+      for (const enemy of state.enemies) {
+        enemy.attackCooldown = Math.max(0, enemy.attackCooldown - dt);
+        if (enemy.type === 'boss') {
+          enemy.phase += dt;
+        }
+
+        const dx = state.player.x - enemy.x;
+        const dy = state.player.y - enemy.y;
+        const len = Math.hypot(dx, dy) || 1;
+
+        if (len < 240) {
+          enemy.x += (dx / len) * enemy.speed * dt;
+          enemy.y += (dy / len) * enemy.speed * dt;
+        }
+
+        if (len < 36 && enemy.attackCooldown <= 0) {
+          state.player.hp -= enemy.damage;
+          enemy.attackCooldown = 0.8;
+        }
+
+        for (const projectile of state.projectiles) {
+          if (projectile.owner === 'player') {
+            const hit = rectsIntersect({ x: projectile.x, y: projectile.y, w: projectile.w, h: projectile.h }, { x: enemy.x, y: enemy.y, w: enemy.w, h: enemy.h });
+            if (hit) {
+              enemy.hp -= projectile.damage;
+              projectile.life = 0;
+            }
+          }
+        }
+      }
+
+      state.enemies = state.enemies.filter(enemy => {
+        if (enemy.hp <= 0) {
+          if (enemy.type === 'boss') {
+            state.bossDefeated = true;
+            showToast('Floor Cleared');
+            state.familyLegacy.bossKills += 1;
+            saveLegacy();
+            state.player.hp = state.player.maxHp;
+            state.floor += 1;
+            if (state.floor > state.maxFloor) {
+              state.mode = 'title';
+              showToast('The Curse Is Broken');
+              state.floor = 1;
+            } else {
+              generateWorld();
+            }
+          } else {
+            spawnLoot(enemy.x, enemy.y);
+          }
+          return false;
+        }
+        return true;
+      });
+
+      for (const lootItem of state.loot) {
+        if (rectsIntersect({ x: state.player.x, y: state.player.y, w: state.player.w, h: state.player.h }, { x: lootItem.x, y: lootItem.y, w: lootItem.w, h: lootItem.h })) {
+          if (lootItem.type === 'gold') {
+            state.town.gold += 8;
+          } else {
+            state.familyLegacy.resolve += 1;
+            state.selectedWeapon = 'Cursed Spear';
+          }
+          lootItem.collected = true;
+        }
+      }
+      state.loot = state.loot.filter(item => !item.collected);
+
+      if (state.player.hp <= 0) {
+        state.familyGeneration += 1;
+        state.familyLegacy.vitality += 1;
+        state.familyLegacy.strength += 1;
+        state.familyLegacy.resolve += 1;
+        saveLegacy();
+        state.mode = 'town';
+        state.floor = Math.max(1, state.floor - 1);
+        state.player = createPlayer();
+        state.player.hp = state.player.maxHp;
+        ui.floorValue.textContent = state.floor;
+        ui.familyValue.textContent = 'Gen ' + state.familyGeneration;
+        showToast('The next heir rises');
+      }
+
+      ui.healthValue.textContent = `${Math.ceil(state.player.hp)} / ${state.player.maxHp}`;
+      ui.weaponValue.textContent = state.selectedWeapon;
+    }
+
+    function renderTitle() {
+      ctx.fillStyle = '#08121d';
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+      ctx.fillStyle = '#7dd3fc';
+      ctx.font = 'bold 44px Segoe UI';
+      ctx.textAlign = 'center';
+      ctx.fillText('Copilot Ascent', GAME_WIDTH / 2, 200);
+
+      ctx.font = '20px Segoe UI';
+      ctx.fillStyle = '#dfefff';
+      ctx.fillText('A rogue-like ascent through a cursed tower', GAME_WIDTH / 2, 250);
+      ctx.fillText('Press ENTER to begin', GAME_WIDTH / 2, 340);
+      ctx.fillText('WASD to move, SPACE to strike, Q to town, E to enter', GAME_WIDTH / 2, 380);
+
+      ctx.fillText('Survive floor 50 and lift the family curse.', GAME_WIDTH / 2, 430);
+      ctx.fillStyle = '#67e8f9';
+      ctx.fillText('Legacy: ' + state.familyGeneration + ' generation', GAME_WIDTH / 2, 500);
+    }
+
+    function renderTown() {
+      ctx.fillStyle = '#0d1826';
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+      ctx.fillStyle = '#7dd3fc';
+      ctx.font = 'bold 32px Segoe UI';
+      ctx.textAlign = 'center';
+      ctx.fillText('Town of the Last Heir', GAME_WIDTH / 2, 90);
+
+      ctx.fillStyle = '#dfefff';
+      ctx.font = '20px Segoe UI';
+      ctx.fillText('E - Return to the Tower', GAME_WIDTH / 2, 150);
+      ctx.fillText('Gold: ' + state.town.gold + '   Relics: ' + state.familyLegacy.resolve, GAME_WIDTH / 2, 190);
+
+      ctx.fillStyle = '#67e8f9';
+      ctx.fillRect(180, 230, 240, 150);
+      ctx.fillStyle = '#dfefff';
+      ctx.fillText('Vitality', 300, 270);
+      ctx.fillText('Level ' + state.town.upgrades.vitality, 300, 305);
+      ctx.fillText('Cost: 15 gold', 300, 340);
+      ctx.fillText('Press 1', 300, 365);
+
+      ctx.fillStyle = '#67e8f9';
+      ctx.fillRect(500, 230, 240, 150);
+      ctx.fillStyle = '#dfefff';
+      ctx.fillText('Strength', 620, 270);
+      ctx.fillText('Level ' + state.town.upgrades.strength, 620, 305);
+      ctx.fillText('Cost: 15 gold', 620, 340);
+      ctx.fillText('Press 2', 620, 365);
+
+      ctx.fillStyle = '#67e8f9';
+      ctx.fillRect(820, 230, 240, 150);
+      ctx.fillStyle = '#dfefff';
+      ctx.fillText('Resolve', 940, 270);
+      ctx.fillText('Level ' + state.town.upgrades.resolve, 940, 305);
+      ctx.fillText('Cost: 15 gold', 940, 340);
+      ctx.fillText('Press 3', 940, 365);
+
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillText('Family Blessing: ' + state.familyLegacy.bossKills + ' bosses defeated', GAME_WIDTH / 2, 610);
+    }
+
+    function renderRun() {
+      ctx.fillStyle = '#0a1320';
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+      // floor background
+      const gradient = ctx.createLinearGradient(0, 0, 0, GAME_HEIGHT);
+      gradient.addColorStop(0, '#101b2b');
+      gradient.addColorStop(1, '#050c17');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+      // draw room grid
+      const roomCols = 7;
+      const roomWidth = 150;
+      const roomHeight = 110;
+      const startX = 160;
+      const startY = 100;
+
+      for (let y = 0; y < state.roomSize; y++) {
+        for (let x = 0; x < state.roomSize; x++) {
+          const room = state.rooms[y][x];
+          const rx = startX + x * roomWidth;
+          const ry = startY + y * roomHeight;
+          const selected = room.type === 'boss' || room.type === 'start';
+
+          ctx.fillStyle = selected ? '#1d3a52' : '#16273b';
+          ctx.fillRect(rx, ry, roomWidth - 6, roomHeight - 6);
+          ctx.strokeStyle = 'rgba(125, 211, 252, 0.35)';
+          ctx.strokeRect(rx, ry, roomWidth - 6, roomHeight - 6);
+
+          ctx.fillStyle = '#dfefff';
+          ctx.font = '12px Segoe UI';
+          ctx.fillText(roomTypeLabel(room.type), rx + 12, ry + 22);
+        }
+      }
+
+      // player
+      ctx.fillStyle = '#7dd3fc';
+      ctx.fillRect(state.player.x, state.player.y, state.player.w, state.player.h);
+
+      // enemies
+      for (const enemy of state.enemies) {
+        ctx.fillStyle = enemy.type === 'boss' ? '#f59e0b' : '#ef4444';
+        ctx.fillRect(enemy.x, enemy.y, enemy.w, enemy.h);
+      }
+
+      // projectiles
+      for (const projectile of state.projectiles) {
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillRect(projectile.x, projectile.y, projectile.w, projectile.h);
+      }
+
+      // loot
+      for (const item of state.loot) {
+        ctx.fillStyle = item.type === 'gold' ? '#fbbf24' : '#a78bfa';
+        ctx.fillRect(item.x, item.y, item.w, item.h);
+      }
+
+      // floor info panel
+      ctx.fillStyle = 'rgba(10, 16, 24, 0.8)';
+      ctx.fillRect(18, 18, 180, 80);
+      ctx.fillStyle = '#dfefff';
+      ctx.font = '16px Segoe UI';
+      ctx.fillText('Floor ' + state.floor, 30, 42);
+      ctx.fillText('Heir: ' + state.familyGeneration, 30, 62);
+      ctx.fillText('HP: ' + Math.ceil(state.player.hp), 30, 82);
+
+      // minimap or objective
+      ctx.fillStyle = 'rgba(10, 16, 24, 0.8)';
+      ctx.fillRect(GAME_WIDTH - 220, 20, 190, 120);
+      ctx.fillStyle = '#dfefff';
+      ctx.font = '14px Segoe UI';
+      ctx.fillText('Objective', GAME_WIDTH - 180, 42);
+      if (state.bossDefeated) {
+        ctx.fillText('Boss defeated', GAME_WIDTH - 180, 60);
+      } else {
+        ctx.fillText('Reach the boss', GAME_WIDTH - 180, 60);
+      }
+      ctx.fillText('Town: Q', GAME_WIDTH - 180, 80);
+      ctx.fillText('Attack: Space', GAME_WIDTH - 180, 100);
+    }
+
+    function render() {
+      if (state.mode === 'title') renderTitle();
+      else if (state.mode === 'town') renderTown();
+      else renderRun();
+    }
+
+    function update(dt) {
+      state.time += dt;
+
+      if (state.mode === 'run') {
+        updatePlayer(dt);
+      }
+
+      if (state.mode === 'title' && state.keys.space) {
+        state.mode = 'run';
+        state.floor = 1;
+        generateWorld();
+        showToast('The ascent begins');
+      }
+
+      if (state.mode === 'title' && state.keys.enter) {
+        state.mode = 'run';
+        state.floor = 1;
+        generateWorld();
+      }
+
+      if (state.mode === 'town') {
+        if (state.keys['1']) {
+          if (state.town.gold >= 15) {
+            state.town.gold -= 15;
+            state.town.upgrades.vitality += 1;
+            state.familyLegacy.vitality += 1;
+            saveLegacy();
+            showToast('Vitality Up');
+          }
+        }
+
+        if (state.keys['2']) {
+          if (state.town.gold >= 15) {
+            state.town.gold -= 15;
+            state.town.upgrades.strength += 1;
+            state.familyLegacy.strength += 1;
+            saveLegacy();
+            showToast('Strength Up');
+          }
+        }
+
+        if (state.keys['3']) {
+          if (state.town.gold >= 15) {
+            state.town.gold -= 15;
+            state.town.upgrades.resolve += 1;
+            state.familyLegacy.resolve += 1;
+            saveLegacy();
+            showToast('Resolve Up');
+          }
+        }
+
+        if (state.keys.e) {
+          state.mode = 'run';
+          generateWorld();
+          showToast('Tower Access');
+        }
+      }
+    }
+
+    function loop(timestamp) {
+      const dt = Math.min(0.032, (timestamp - state.lastTime) / 1000 || 0.016);
+      state.lastTime = timestamp;
+      update(dt);
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    function bindKeys() {
+      const keyMap = {
+        w: 'w', a: 'a', s: 's', d: 'd',
+        ArrowUp: 'w', ArrowLeft: 'a', ArrowDown: 's', ArrowRight: 'd',
+        ' ': 'space', e: 'e', q: 'q', Enter: 'enter',
+        '1': '1', '2': '2', '3': '3'
+      };
+
+      window.addEventListener('keydown', (event) => {
+        const key = keyMap[event.key] || event.key.toLowerCase();
+        if (key in state.keys) {
+          state.keys[key] = true;
+        }
+      });
+
+      window.addEventListener('keyup', (event) => {
+        const key = keyMap[event.key] || event.key.toLowerCase();
+        if (key in state.keys) {
+          state.keys[key] = false;
+        }
+      });
+    }
+
+    loadLegacy();
+    bindKeys();
+    generateWorld();
+    state.mode = 'title';
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
